@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>사운드 패드</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+  body { background: #0A0A0F; font-family: 'Segoe UI', system-ui, sans-serif; user-select: none; }
+  @keyframes blink { from { opacity: 1; } to { opacity: 0.2; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useRef, useCallback, useEffect } = React;
+
+const COLS = 4, ROWS = 3, TOTAL = COLS * ROWS, MAX_REC_MS = 3000;
+
+const PAD_COLORS = [
+  "#FF4D6D","#FF6B35","#FFB703","#06D6A0",
+  "#4CC9F0","#4361EE","#9B5DE5","#F72585",
+  "#E63946","#2EC4B6","#CBFF8C","#FF9F1C",
+];
+const EMOJI_LABELS = ["🐶","🐱","🐸","🎵","🥁","🎹","🎸","🎺","👏","💨","🌊","🔔"];
+
+function getMimeType() {
+  const types = ["video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"];
+  return types.find(t => MediaRecorder.isTypeSupported(t)) || "";
+}
+
+function PadVideo({ url, onEnd }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    v.play().catch(console.error);
+    v.onended = onEnd;
+  }, []);
+  return (
+    <video ref={ref} src={url} playsInline style={{
+      position:"absolute", inset:0, width:"100%", height:"100%",
+      objectFit:"cover", borderRadius:14, zIndex:1,
+    }} />
+  );
+}
+
+function App() {
+  const [pads, setPads] = useState(Array(TOTAL).fill(null));
+  const [mode, setMode] = useState("play");
+  const [recordingIdx, setRecordingIdx] = useState(null);
+  const [playKeys, setPlayKeys] = useState({});
+  const [cameraReady, setCameraReady] = useState(false);
+  const [recProgress, setRecProgress] = useState(0);
+
+  const mrRef = useRef(null);
+  const chunksRef = useRef([]);
+  const streamRef = useRef(null);
+  const cameraVideoRef = useRef(null);
+  const timerRef = useRef(null);
+  const progressRef = useRef(null);
+
+  useEffect(() => () => {
+    clearTimeout(timerRef.current);
+    clearInterval(progressRef.current);
+    streamRef.current?.getTracks().forEach(t => t.stop());
+  }, []);
+
+  const stopRecord = useCallback(() => {
+    clearTimeout(timerRef.current);
+    clearInterval(progressRef.current);
+    if (mrRef.current?.state !== "inactive") mrRef.current.stop();
+  }, []);
+
+  const startRecord = useCallback(async (idx) => {
+    if (recordingIdx !== null) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.srcObject = stream;
+        cameraVideoRef.current.play();
+      }
+
+      const mimeType = getMimeType();
+      const mr = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+      mrRef.current = mr;
+      mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        // 트랙 멈추기 전에 라이브 카메라에서 썸네일 캡처
+        let thumb = null;
+        const lv = cameraVideoRef.current;
+        if (lv && lv.readyState >= 2 && lv.videoWidth > 0) {
+          try {
+            const c = document.createElement("canvas");
+            c.width = lv.videoWidth; c.height = lv.videoHeight;
+            c.getContext("2d").drawImage(lv, 0, 0);
+            thumb = c.toDataURL("image/jpeg", 0.8);
+          } catch(e) { thumb = null; }
+        }
+        const blob = new Blob(chunksRef.current, { type: "video/webm" });
+        const url = URL.createObjectURL(blob);
+        setPads(p => { const n = [...p]; n[idx] = { url, thumb }; return n; });
+        stream.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+        setCameraReady(false);
+        setRecordingIdx(null);
+        setRecProgress(0);
+        clearInterval(progressRef.current);
+      };
+
+      mr.start(100);
+      setRecordingIdx(idx);
+      setCameraReady(true);
+
+      let elapsed = 0;
+      progressRef.current = setInterval(() => {
+        elapsed += 100;
+        setRecProgress(elapsed / MAX_REC_MS);
+        if (elapsed >= MAX_REC_MS) clearInterval(progressRef.current);
+      }, 100);
+      timerRef.current = setTimeout(() => stopRecord(), MAX_REC_MS);
+    } catch (err) {
+      console.error(err);
+      setRecordingIdx(null);
+      setCameraReady(false);
+    }
+  }, [recordingIdx]);
+
+  const playPad = useCallback((idx) => {
+    if (!pads[idx]) return;
+    setPlayKeys(k => ({ ...k, [idx]: (k[idx] || 0) + 1 }));
+  }, [pads]);
+
+  const stopPad = useCallback((idx) => {
+    setPlayKeys(k => { const n = { ...k }; delete n[idx]; return n; });
+  }, []);
+
+  const deletePad = (e, idx) => {
+    e.stopPropagation();
+    stopPad(idx);
+    setPads(p => { const n = [...p]; n[idx] = null; return n; });
+  };
+
+  const handlePad = (idx) => {
+    if (mode === "record") startRecord(idx);
+    else playPad(idx);
+  };
+
+  return (
+    <div style={{
+      minHeight:"100dvh", display:"flex", flexDirection:"column",
+      alignItems:"center", padding:"0 12px 24px",
+    }}>
+      {/* Header */}
+      <div style={{
+        width:"100%", maxWidth:560,
+        display:"flex", alignItems:"center", justifyContent:"space-between",
+        padding:"20px 0 16px",
+      }}>
+        <div>
+          <div style={{ color:"#fff", fontSize:20, fontWeight:800, letterSpacing:-0.5 }}>
+            🎛 사운드 패드
+          </div>
+          <div style={{ color:"#555", fontSize:11, marginTop:2 }}>
+            {mode === "record" ? "패드를 눌러 녹음하세요" : "패드를 눌러 재생하세요"}
+          </div>
+        </div>
+        <button
+          onClick={() => setMode(m => m === "play" ? "record" : "play")}
+          style={{
+            padding:"10px 18px", borderRadius:50, border:"none",
+            background: mode === "record"
+              ? "linear-gradient(135deg,#FF4D6D,#FF6B35)"
+              : "linear-gradient(135deg,#06D6A0,#4CC9F0)",
+            color:"#fff", fontWeight:700, fontSize:13, cursor:"pointer",
+            boxShadow: mode === "record"
+              ? "0 0 20px rgba(255,77,109,0.5)"
+              : "0 0 20px rgba(6,214,160,0.4)",
+            transition:"all 0.3s",
+          }}
+        >
+          {mode === "record" ? "🔴 녹음 모드" : "▶ 재생 모드"}
+        </button>
+      </div>
+
+      {/* Grid */}
+      <div style={{
+        display:"grid",
+        gridTemplateColumns:`repeat(${COLS}, 1fr)`,
+        gap:10, width:"100%", maxWidth:560,
+      }}>
+        {Array.from({ length: TOTAL }, (_, i) => {
+          const pad = pads[i];
+          const isRec = recordingIdx === i;
+          const playKey = playKeys[i];
+          const isPlay = !!playKey;
+          const color = PAD_COLORS[i];
+
+          return (
+            <div
+              key={i}
+              onPointerDown={() => handlePad(i)}
+              style={{
+                aspectRatio:"1", borderRadius:16,
+                background: pad?.thumb && !isPlay
+                  ? `url(${pad.thumb}) center/cover`
+                  : `${color}22`,
+                border: isRec ? `2.5px solid #FF4D6D`
+                  : isPlay ? `2.5px solid ${color}`
+                  : `2px solid ${color}44`,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                cursor:"pointer", position:"relative", overflow:"hidden",
+                transition:"transform 0.08s, box-shadow 0.08s",
+                transform: isPlay ? "scale(0.93)" : "scale(1)",
+                boxShadow: isPlay ? `0 0 28px ${color}aa`
+                  : isRec ? "0 0 24px rgba(255,77,109,0.6)"
+                  : "none",
+                touchAction:"none",
+              }}
+            >
+              {pad && isPlay && (
+                <PadVideo key={playKey} url={pad.url} onEnd={() => stopPad(i)} />
+              )}
+
+              {isPlay && (
+                <div style={{
+                  position:"absolute", inset:0, zIndex:2, pointerEvents:"none",
+                  background:`linear-gradient(to top, ${color}55 0%, transparent 60%)`,
+                  borderRadius:14,
+                }} />
+              )}
+
+              {!pad && (
+                <div style={{ textAlign:"center", position:"relative", zIndex:2 }}>
+                  <div style={{ fontSize:28 }}>{EMOJI_LABELS[i]}</div>
+                  {mode === "record" && (
+                    <div style={{ color, fontSize:10, fontWeight:700, marginTop:4 }}>
+                      탭하여 녹음
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {pad && !isPlay && !isRec && (
+                <div style={{
+                  position:"absolute", inset:0, zIndex:2,
+                  background:"linear-gradient(to top, rgba(0,0,0,0.5) 0%, transparent 60%)",
+                  borderRadius:14,
+                }} />
+              )}
+
+              {isRec && (
+                <div style={{
+                  position:"absolute", top:8, left:8, zIndex:5,
+                  display:"flex", alignItems:"center", gap:4,
+                  background:"rgba(0,0,0,0.75)", borderRadius:20, padding:"3px 8px",
+                }}>
+                  <div style={{
+                    width:7, height:7, borderRadius:"50%", background:"#FF4D6D",
+                    animation:"blink 0.5s alternate infinite",
+                  }} />
+                  <span style={{ color:"#FF4D6D", fontSize:10, fontWeight:700 }}>REC</span>
+                </div>
+              )}
+
+              {pad && mode === "record" && !isRec && (
+                <button
+                  onPointerDown={e => deletePad(e, i)}
+                  style={{
+                    position:"absolute", top:6, right:6, zIndex:10,
+                    width:22, height:22, borderRadius:"50%",
+                    background:"rgba(0,0,0,0.75)", border:"none",
+                    color:"#fff", fontSize:12, cursor:"pointer",
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                  }}
+                >✕</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop:20, color:"#444", fontSize:12, textAlign:"center", lineHeight:1.8 }}>
+        {mode === "record"
+          ? "패드를 눌러 녹음 → 자동 3초 후 저장 | ✕ 버튼으로 삭제"
+          : "여러 패드를 빠르게 눌러 비트를 만들어 보세요!"}
+      </div>
+
+      {/* Camera Modal */}
+      {cameraReady && (
+        <div style={{
+          position:"fixed", inset:0, background:"rgba(0,0,0,0.92)",
+          display:"flex", flexDirection:"column",
+          alignItems:"center", justifyContent:"center",
+          zIndex:100, gap:16,
+        }}>
+          <div style={{ color:"#FF4D6D", fontWeight:800, fontSize:16, letterSpacing:2 }}>
+            🔴 녹음 중
+          </div>
+          <video
+            ref={cameraVideoRef}
+            muted autoPlay playsInline
+            style={{
+              width:280, height:210, borderRadius:16,
+              border:"2px solid #FF4D6D", background:"#000",
+              objectFit:"cover", boxShadow:"0 0 40px rgba(255,77,109,0.4)",
+              transform:"scaleX(-1)",
+            }}
+          />
+          <div style={{ width:280, height:6, background:"#222", borderRadius:3, overflow:"hidden" }}>
+            <div style={{
+              height:"100%", width:`${recProgress * 100}%`,
+              background:"linear-gradient(90deg,#FF4D6D,#FF6B35)",
+              borderRadius:3, transition:"width 0.1s linear",
+            }} />
+          </div>
+          <button
+            onClick={stopRecord}
+            style={{
+              padding:"12px 32px", borderRadius:50, border:"none",
+              background:"linear-gradient(135deg,#FF4D6D,#FF6B35)",
+              color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer",
+              boxShadow:"0 0 24px rgba(255,77,109,0.5)",
+            }}
+          >⏹ 녹음 완료</button>
+          <div style={{ color:"#555", fontSize:12 }}>최대 3초 · 자동으로 저장됩니다</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
