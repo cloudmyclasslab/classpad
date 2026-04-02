@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>사운드 패드 Beta</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -10,15 +10,15 @@
 <style>
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; margin:0; padding:0; }
   body { background:#0A0A0F; font-family:'Segoe UI',system-ui,sans-serif; user-select:none; overflow:hidden; height:100dvh; }
-  @keyframes blink   { from{opacity:1} to{opacity:0.2} }
-  @keyframes slideUp { from{transform:translateY(100%)} to{transform:translateY(0)} }
-  @keyframes fadeIn  { from{opacity:0} to{opacity:1} }
-  @keyframes toastIn { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
-  @keyframes countPop{ 0%{transform:scale(0.4);opacity:0} 70%{transform:scale(1.1)} 100%{transform:scale(1);opacity:1} }
-  input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:2px;background:#2a2a3e;outline:none}
-  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:#4CC9F0;cursor:pointer}
-  input[type=text]{background:#1a1a2e;border:1px solid #2a2a3e;color:#fff;border-radius:8px;padding:10px 12px;font-size:14px;width:100%;outline:none}
-  input[type=text]:focus{border-color:#4CC9F0}
+  @keyframes blink     { from{opacity:1} to{opacity:0.2} }
+  @keyframes slideUp   { from{transform:translateY(100%)} to{transform:translateY(0)} }
+  @keyframes fadeIn    { from{opacity:0} to{opacity:1} }
+  @keyframes toastIn   { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes countPop  { 0%{opacity:0;transform:translate(-50%,-50%) scale(2)} 40%{opacity:1} 100%{opacity:1;transform:translate(-50%,-50%) scale(1)} }
+  input[type=range] { -webkit-appearance:none; width:100%; height:4px; border-radius:2px; background:#2a2a3e; outline:none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px; border-radius:50%; background:#4CC9F0; cursor:pointer; }
+  input[type=text] { background:#1a1a2e; border:1px solid #2a2a3e; color:#fff; border-radius:8px; padding:10px 12px; font-size:14px; width:100%; outline:none; }
+  input[type=text]:focus { border-color:#4CC9F0; }
 </style>
 </head>
 <body>
@@ -26,7 +26,7 @@
 <script type="text/babel">
 const { useState, useRef, useCallback, useEffect } = React;
 
-// ── IndexedDB (cached connection) ─────────────────────────────
+// ── DB (connection cached) ─────────────────────────────────────
 const DB_NAME = 'soundpad_v1';
 let _db = null;
 function openDB() {
@@ -38,71 +38,12 @@ function openDB() {
     r.onerror = e => rej(e.target.error);
   });
 }
-const dbPut = async (key, val) => {
-  const db = await openDB();
-  return new Promise((res, rej) => {
-    const tx = db.transaction('data', 'readwrite');
-    tx.objectStore('data').put(val, key);
-    tx.oncomplete = res; tx.onerror = e => rej(e.target.error);
-  });
-};
-const dbGet = async key => {
-  const db = await openDB();
-  return new Promise((res, rej) => {
-    const tx = db.transaction('data', 'readonly');
-    const r = tx.objectStore('data').get(key);
-    r.onsuccess = e => res(e.target.result); r.onerror = e => rej(e.target.error);
-  });
-};
-const dbDel = async key => {
-  const db = await openDB();
-  return new Promise((res, rej) => {
-    const tx = db.transaction('data', 'readwrite');
-    tx.objectStore('data').delete(key);
-    tx.oncomplete = res; tx.onerror = e => rej(e.target.error);
-  });
-};
-const dbClearAll = async () => {
-  const db = await openDB();
-  return new Promise((res, rej) => {
-    const tx = db.transaction('data', 'readwrite');
-    tx.objectStore('data').clear();
-    tx.oncomplete = res; tx.onerror = e => rej(e.target.error);
-  });
-};
+const dbPut = async (k, v) => { const db = await openDB(); return new Promise((res,rej) => { const tx = db.transaction('data','readwrite'); tx.objectStore('data').put(v,k); tx.oncomplete=res; tx.onerror=e=>rej(e.target.error); }); };
+const dbGet = async (k)    => { const db = await openDB(); return new Promise((res,rej) => { const tx = db.transaction('data','readonly'); const r=tx.objectStore('data').get(k); r.onsuccess=e=>res(e.target.result); r.onerror=e=>rej(e.target.error); }); };
+const dbDel = async (k)    => { const db = await openDB(); return new Promise((res,rej) => { const tx = db.transaction('data','readwrite'); tx.objectStore('data').delete(k); tx.oncomplete=res; tx.onerror=e=>rej(e.target.error); }); };
+const dbClear = async ()   => { const db = await openDB(); return new Promise((res,rej) => { const tx = db.transaction('data','readwrite'); tx.objectStore('data').clear(); tx.oncomplete=res; tx.onerror=e=>rej(e.target.error); }); };
 
-// ── Save helpers ──────────────────────────────────────────────
-const saveMetadata = async (pads, settings) => {
-  const padMeta = pads.map(p => p
-    ? { thumb: p.thumb, label: p.label || '', volume: p.volume !== undefined ? p.volume : 1 }
-    : null);
-  await dbPut('metadata', { ...settings, padMeta });
-};
-const savePadBlob = async (idx, url) => {
-  const blob = await fetch(url).then(r => r.blob());
-  await dbPut(`blob_${idx}`, blob);
-};
-
-// ── Constants ─────────────────────────────────────────────────
-const GAP = 10;
-const COLORS = [
-  '#FF4D6D','#FF6B35','#FFB703','#06D6A0','#4CC9F0','#4361EE','#9B5DE5','#F72585',
-  '#E63946','#2EC4B6','#CBFF8C','#FF9F1C','#A8DADC','#457B9D','#E9C46A','#F4A261',
-  '#C77DFF','#52B788','#FF6B9D','#00B4D8','#FFC8DD','#BDE0FE','#CAFFBF','#FDFFB6',
-];
-const EMOJIS = [
-  '🐶','🐱','🐸','🎵','🥁','🎹','🎸','🎺','👏','💨','🌊','🔔',
-  '⭐','🎯','🎪','🎨','🦁','🐯','🦊','🐧','🌈','🔥','💧','🌿',
-];
-const pc = i => COLORS[i % COLORS.length];
-const pe = i => EMOJIS[i % EMOJIS.length];
-
-function getMimeType() {
-  const ts = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
-  return ts.find(t => MediaRecorder.isTypeSupported(t)) || '';
-}
-
-// ── captureMidFrame (stable, outside component) ───────────────
+// ── captureMidFrame — outside component (stable reference) ─────
 function captureMidFrame(url, cb) {
   const v = document.createElement('video');
   v.src = url; v.muted = true; v.preload = 'metadata';
@@ -119,7 +60,17 @@ function captureMidFrame(url, cb) {
   v.onerror = () => cb(null);
 }
 
-// ── PadVideo ──────────────────────────────────────────────────
+// ── Constants ──────────────────────────────────────────────────
+const GAP = 10;
+const COLORS = ['#FF4D6D','#FF6B35','#FFB703','#06D6A0','#4CC9F0','#4361EE','#9B5DE5','#F72585','#E63946','#2EC4B6','#CBFF8C','#FF9F1C','#A8DADC','#457B9D','#E9C46A','#F4A261','#C77DFF','#52B788','#FF6B9D','#00B4D8','#FFC8DD','#BDE0FE','#CAFFBF','#FDFFB6'];
+const EMOJIS = ['🐶','🐱','🐸','🎵','🥁','🎹','🎸','🎺','👏','💨','🌊','🔔','⭐','🎯','🎪','🎨','🦁','🐯','🦊','🐧','🌈','🔥','💧','🌿'];
+const pColor = i => COLORS[i % COLORS.length];
+const pEmoji = i => EMOJIS[i % EMOJIS.length];
+function getMime() {
+  return ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(t => MediaRecorder.isTypeSupported(t)) || '';
+}
+
+// ── Sub-components ─────────────────────────────────────────────
 function PadVideo({ url, volume, onEnd }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -128,601 +79,582 @@ function PadVideo({ url, volume, onEnd }) {
     v.play().catch(console.error);
     v.onended = onEnd;
   }, []);
-  return <video ref={ref} src={url} playsInline style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover', borderRadius:14, zIndex:1 }} />;
+  return <video ref={ref} src={url} playsInline style={{ position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',borderRadius:14,zIndex:1 }} />;
 }
 
-// ── Toast ─────────────────────────────────────────────────────
 function Toast({ msg }) {
-  return (
-    <div style={{ position:'fixed', bottom:28, left:'50%', transform:'translateX(-50%)', background:'#1a1a2e', color:'#06D6A0', padding:'10px 22px', border:'1px solid #06D6A044', borderRadius:50, fontWeight:700, fontSize:13, zIndex:600, animation:'toastIn 0.25s ease-out', whiteSpace:'nowrap', boxShadow:'0 4px 24px rgba(0,0,0,0.6)' }}>
-      {msg}
-    </div>
-  );
+  return <div style={{ position:'fixed',bottom:32,left:'50%',transform:'translateX(-50%)',background:'#06D6A0',color:'#000',padding:'10px 24px',borderRadius:50,fontWeight:700,fontSize:13,zIndex:500,animation:'toastIn 0.3s ease-out',boxShadow:'0 4px 20px rgba(6,214,160,0.4)',whiteSpace:'nowrap' }}>{msg}</div>;
 }
 
-// ── CountdownOverlay ──────────────────────────────────────────
-function CountdownOverlay({ count, onCancel }) {
-  const colors = { 3:'#06D6A0', 2:'#FFB703', 1:'#FF4D6D' };
-  const c = colors[count] || '#fff';
-  return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.9)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:280, gap:24 }}>
-      <div key={count} style={{ fontSize:130, fontWeight:900, lineHeight:1, color:c, animation:'countPop 0.45s ease-out', textShadow:`0 0 80px ${c}66` }}>{count}</div>
-      <div style={{ color:'#555', fontSize:13, letterSpacing:2 }}>녹음 준비 중...</div>
-      <button onClick={onCancel} style={{ marginTop:8, padding:'10px 28px', borderRadius:50, border:'1px solid #333', background:'transparent', color:'#555', fontSize:13, cursor:'pointer' }}>취소</button>
-    </div>
-  );
-}
-
-// ── ConfirmModal ──────────────────────────────────────────────
-function ConfirmModal({ title, msg, onOk, onCancel, okLabel='확인', okColor='#FF4D6D' }) {
-  return (
-    <>
-      <div onClick={onCancel} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', zIndex:500 }} />
-      <div style={{ position:'fixed', top:'50%', left:'50%', transform:'translate(-50%,-50%)', background:'#111128', borderRadius:20, padding:28, width:300, zIndex:501, animation:'fadeIn 0.2s' }}>
-        <div style={{ color:'#fff', fontWeight:800, fontSize:15, marginBottom:10 }}>{title}</div>
-        <div style={{ color:'#888', fontSize:13, lineHeight:1.7, marginBottom:24 }}>{msg}</div>
-        <div style={{ display:'flex', gap:10 }}>
-          <button onClick={onCancel} style={{ flex:1, padding:'11px 0', borderRadius:10, border:'1px solid #2a2a3e', background:'#1a1a2e', color:'#aaa', fontWeight:700, cursor:'pointer', fontSize:13 }}>취소</button>
-          <button onClick={onOk} style={{ flex:1, padding:'11px 0', borderRadius:10, border:'none', background:okColor, color:'#fff', fontWeight:700, cursor:'pointer', fontSize:13 }}>{okLabel}</button>
-        </div>
+function Confirm({ msg, onOk, onCancel }) {
+  return <>
+    <div onClick={onCancel} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:600 }} />
+    <div style={{ position:'fixed',top:'50%',left:'50%',transform:'translate(-50%,-50%)',background:'#111128',borderRadius:20,padding:28,width:'min(300px,90vw)',zIndex:601,animation:'fadeIn 0.2s' }}>
+      <div style={{ color:'#fff',fontSize:14,fontWeight:600,marginBottom:24,textAlign:'center',lineHeight:1.7,whiteSpace:'pre-line' }}>{msg}</div>
+      <div style={{ display:'flex',gap:10 }}>
+        <button onClick={onCancel} style={{ flex:1,padding:'11px 0',borderRadius:10,border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontWeight:700,cursor:'pointer',fontSize:13 }}>취소</button>
+        <button onClick={onOk}     style={{ flex:1,padding:'11px 0',borderRadius:10,border:'none',background:'linear-gradient(135deg,#FF4D6D,#FF6B35)',color:'#fff',fontWeight:700,cursor:'pointer',fontSize:13 }}>확인</button>
       </div>
-    </>
-  );
+    </div>
+  </>;
 }
 
-// ── PadEditModal ──────────────────────────────────────────────
-function PadEditModal({ pad, onSave, onClose }) {
+function EditModal({ pad, onSave, onClose }) {
   const [label, setLabel] = useState(pad?.label || '');
-  const [vol, setVol] = useState(pad?.volume !== undefined ? pad.volume : 1);
-  return (
-    <>
-      <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:450 }} />
-      <div style={{ position:'fixed', top:'50%', left:'50%', transform:'translate(-50%,-50%)', background:'#111128', borderRadius:20, padding:28, width:300, zIndex:451, animation:'fadeIn 0.2s' }}>
-        <div style={{ color:'#fff', fontWeight:800, fontSize:15, marginBottom:20 }}>✏️ 패드 편집</div>
-        <div style={{ marginBottom:20 }}>
-          <div style={{ color:'#666', fontSize:11, fontWeight:700, letterSpacing:1, marginBottom:8 }}>패드 이름</div>
-          <input type="text" value={label} onChange={e => setLabel(e.target.value)} placeholder="이름 입력..." maxLength={12} autoFocus />
-        </div>
-        <div style={{ marginBottom:28 }}>
-          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
-            <span style={{ color:'#666', fontSize:11, fontWeight:700, letterSpacing:1 }}>패드 볼륨</span>
-            <span style={{ color:'#4CC9F0', fontSize:12, fontWeight:700 }}>{Math.round(vol*100)}%</span>
-          </div>
-          <input type="range" min={0} max={1} step={0.05} value={vol} onChange={e => setVol(+e.target.value)} />
-        </div>
-        <div style={{ display:'flex', gap:10 }}>
-          <button onClick={onClose} style={{ flex:1, padding:'10px 0', borderRadius:10, border:'1px solid #2a2a3e', background:'#1a1a2e', color:'#aaa', fontWeight:700, cursor:'pointer', fontSize:13 }}>취소</button>
-          <button onClick={() => onSave(label.trim(), vol)} style={{ flex:1, padding:'10px 0', borderRadius:10, border:'none', background:'linear-gradient(135deg,#4CC9F0,#4361EE)', color:'#fff', fontWeight:700, cursor:'pointer', fontSize:13 }}>저장</button>
-        </div>
+  const [vol, setVol]     = useState(pad?.volume ?? 1);
+  return <>
+    <div onClick={onClose} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:400 }} />
+    <div style={{ position:'fixed',top:'50%',left:'50%',transform:'translate(-50%,-50%)',background:'#111128',borderRadius:20,padding:28,width:'min(300px,90vw)',zIndex:401,animation:'fadeIn 0.2s' }}>
+      <div style={{ color:'#fff',fontWeight:800,fontSize:15,marginBottom:20 }}>✏️ 패드 편집</div>
+      <div style={{ marginBottom:20 }}>
+        <div style={{ color:'#666',fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:8 }}>패드 이름</div>
+        <input type="text" value={label} onChange={e=>setLabel(e.target.value)} placeholder="이름 입력..." maxLength={12} autoFocus />
       </div>
-    </>
-  );
+      <div style={{ marginBottom:28 }}>
+        <div style={{ display:'flex',justifyContent:'space-between',marginBottom:8 }}>
+          <span style={{ color:'#666',fontSize:11,fontWeight:700,letterSpacing:1 }}>패드 볼륨</span>
+          <span style={{ color:'#4CC9F0',fontSize:12,fontWeight:700 }}>{Math.round(vol*100)}%</span>
+        </div>
+        <input type="range" min={0} max={1} step={0.05} value={vol} onChange={e=>setVol(+e.target.value)} />
+      </div>
+      <div style={{ display:'flex',gap:10 }}>
+        <button onClick={onClose}                  style={{ flex:1,padding:'10px 0',borderRadius:10,border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontWeight:700,cursor:'pointer',fontSize:13 }}>취소</button>
+        <button onClick={()=>onSave(label.trim(),vol)} style={{ flex:1,padding:'10px 0',borderRadius:10,border:'none',background:'linear-gradient(135deg,#4CC9F0,#4361EE)',color:'#fff',fontWeight:700,cursor:'pointer',fontSize:13 }}>저장</button>
+      </div>
+    </div>
+  </>;
 }
 
-// ── SettingsPanel ─────────────────────────────────────────────
-function SettingsPanel({ open, onClose, settings, update, onResetClick }) {
-  const dragRef = useRef({ dragging:false, startY:0, curY:0 });
+function Settings({ open, onClose, cfg, set, onReset }) {
+  const panelRef = useRef(null);
+  const dg = useRef({ on:false, y0:0, dy:0 });
   const [ty, setTy] = useState(0);
   useEffect(() => { if (open) setTy(0); }, [open]);
-
-  const hDown = e => { dragRef.current = { dragging:true, startY: e.clientY||e.touches?.[0]?.clientY||0, curY:0 }; };
-  const hMove = e => {
-    if (!dragRef.current.dragging) return;
-    const y = (e.clientY||e.touches?.[0]?.clientY||0) - dragRef.current.startY;
-    if (y < 0) return;
-    dragRef.current.curY = y; setTy(y);
-  };
-  const hUp = () => {
-    if (!dragRef.current.dragging) return;
-    dragRef.current.dragging = false;
-    if (dragRef.current.curY > 120) { onClose(); setTy(0); } else setTy(0);
-  };
-
+  const hDown = e => { dg.current = { on:true, y0:e.clientY||e.touches?.[0]?.clientY||0, dy:0 }; };
+  const hMove = e => { if (!dg.current.on) return; const y=Math.max(0,(e.clientY||e.touches?.[0]?.clientY||0)-dg.current.y0); dg.current.dy=y; setTy(y); };
+  const hUp   = () => { if (!dg.current.on) return; dg.current.on=false; if(dg.current.dy>120){onClose();setTy(0);}else setTy(0); };
   if (!open) return null;
-  const { cols, rows, maxRecMs, globalVolume, cameraFacing } = settings;
-  const sBtn = a => ({ flex:1, padding:'8px 0', borderRadius:8, border:'none', cursor:'pointer', fontWeight:700, fontSize:12, background: a?'#4CC9F0':'#1A1A2E', color: a?'#000':'#555' });
-  const step = d => ({ width:36, height:36, borderRadius:8, border:'1px solid #2a2a3e', background:'#1A1A2E', color:d?'#333':'#fff', fontSize:20, cursor:d?'default':'pointer', display:'flex', alignItems:'center', justifyContent:'center' });
-  const sec = { color:'#666', fontSize:11, fontWeight:700, letterSpacing:1, marginBottom:10 };
-
-  return (
-    <>
-      <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:200 }} />
-      <div onMouseMove={hMove} onMouseUp={hUp} onTouchMove={hMove} onTouchEnd={hUp} style={{ position:'fixed', bottom:0, left:0, right:0, background:'#111128', borderRadius:'20px 20px 0 0', padding:'0 24px 44px', zIndex:201, animation: ty===0?'slideUp 0.25s ease-out':'none', transform:`translateY(${ty}px)`, transition: dragRef.current.dragging?'none':'transform 0.25s ease-out', maxHeight:'90vh', overflowY:'auto' }}>
-        <div onMouseDown={hDown} onTouchStart={hDown} style={{ padding:'16px 0 20px', cursor:'grab', touchAction:'none' }}>
-          <div style={{ width:40, height:4, background:'#444', borderRadius:2, margin:'0 auto' }} />
-        </div>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:28 }}>
-          <span style={{ color:'#fff', fontWeight:800, fontSize:16 }}>⚙️ 환경설정</span>
-          <button onClick={onClose} style={{ background:'none', border:'none', color:'#555', fontSize:20, cursor:'pointer' }}>✕</button>
-        </div>
-
-        {/* 버튼 배치 */}
-        <div style={{ marginBottom:24 }}>
-          <div style={sec}>버튼 배치</div>
-          {[['가로 열 수', cols, 1, 8, 'cols'], ['세로 행 수', rows, 1, 6, 'rows']].map(([label, val, min, max, key]) => (
-            <div key={key} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
-              <span style={{ color:'#aaa', fontSize:13 }}>{label}</span>
-              <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                <button style={step(val<=min)} onClick={() => val>min && update(key, val-1)}>−</button>
-                <span style={{ color:'#fff', fontWeight:800, fontSize:18, minWidth:36, textAlign:'center' }}>{val}</span>
-                <button style={step(val>=max)} onClick={() => val<max && update(key, val+1)}>+</button>
-              </div>
-            </div>
-          ))}
-          <div style={{ color:'#444', fontSize:11, textAlign:'right' }}>총 {cols*rows}개 패드</div>
-        </div>
-
-        {/* 녹음 시간 */}
-        <div style={{ marginBottom:24 }}>
-          <div style={sec}>최대 녹음 시간</div>
-          <div style={{ display:'flex', gap:8 }}>
-            {[1000,3000,5000].map(ms => <button key={ms} style={sBtn(maxRecMs===ms)} onClick={() => update('maxRecMs',ms)}>{ms/1000}초</button>)}
-          </div>
-        </div>
-
-        {/* 전체 볼륨 */}
-        <div style={{ marginBottom:24 }}>
-          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:10 }}>
-            <span style={sec}>전체 볼륨</span>
-            <span style={{ color:'#4CC9F0', fontSize:12, fontWeight:700 }}>{Math.round(globalVolume*100)}%</span>
-          </div>
-          <input type="range" min={0} max={1} step={0.05} value={globalVolume} onChange={e => update('globalVolume',+e.target.value)} />
-        </div>
-
-        {/* 카메라 */}
-        <div style={{ marginBottom:32 }}>
-          <div style={sec}>카메라</div>
-          <div style={{ display:'flex', gap:8 }}>
-            <button style={sBtn(cameraFacing==='user')} onClick={() => update('cameraFacing','user')}>📱 전면</button>
-            <button style={sBtn(cameraFacing==='environment')} onClick={() => update('cameraFacing','environment')}>📷 후면</button>
-          </div>
-        </div>
-
-        <button onClick={onResetClick} style={{ width:'100%', padding:'14px 0', borderRadius:12, border:'none', background:'#2a0a0a', color:'#FF4D6D', fontWeight:700, fontSize:14, cursor:'pointer' }}>🗑 전체 초기화</button>
+  const { cols, rows, maxRecMs, globalVolume, cameraFacing } = cfg;
+  const sBtn = a => ({ flex:1,padding:'8px 0',borderRadius:8,border:'none',cursor:'pointer',fontWeight:700,fontSize:12,background:a?'#4CC9F0':'#1A1A2E',color:a?'#000':'#555' });
+  const stBtn = d => ({ width:36,height:36,borderRadius:8,border:'1px solid #2a2a3e',background:'#1A1A2E',color:d?'#333':'#fff',fontSize:20,cursor:d?'default':'pointer',display:'flex',alignItems:'center',justifyContent:'center' });
+  const sec = { color:'#666',fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:10 };
+  const row = { display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20 };
+  const num = { color:'#fff',fontWeight:800,fontSize:18,minWidth:36,textAlign:'center' };
+  return <>
+    <div onClick={onClose} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:200 }} />
+    <div ref={panelRef} onMouseMove={hMove} onMouseUp={hUp} onTouchMove={hMove} onTouchEnd={hUp}
+      style={{ position:'fixed',bottom:0,left:0,right:0,background:'#111128',borderRadius:'20px 20px 0 0',padding:'24px 24px 44px',zIndex:201,animation:ty===0?'slideUp 0.25s ease-out':'none',transform:`translateY(${ty}px)`,transition:dg.current.on?'none':'transform 0.25s ease-out',maxHeight:'90vh',overflowY:'auto' }}>
+      <div onMouseDown={hDown} onTouchStart={hDown} style={{ width:'100%',padding:'0 0 20px',cursor:'grab',touchAction:'none' }}>
+        <div style={{ width:40,height:4,background:'#444',borderRadius:2,margin:'0 auto' }} />
       </div>
-    </>
-  );
+      <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:28 }}>
+        <span style={{ color:'#fff',fontWeight:800,fontSize:16 }}>⚙️ 환경설정</span>
+        <button onClick={onClose} style={{ background:'none',border:'none',color:'#555',fontSize:20,cursor:'pointer' }}>✕</button>
+      </div>
+
+      {/* 버튼 배치 */}
+      <div style={{ marginBottom:24 }}>
+        <div style={sec}>버튼 배치</div>
+        <div style={row}>
+          <span style={{ color:'#aaa',fontSize:13 }}>가로 열 수</span>
+          <div style={{ display:'flex',alignItems:'center',gap:12 }}>
+            <button style={stBtn(cols<=1)} onClick={()=>cols>1&&set('cols',cols-1)}>−</button>
+            <span style={num}>{cols}</span>
+            <button style={stBtn(cols>=8)} onClick={()=>cols<8&&set('cols',cols+1)}>+</button>
+          </div>
+        </div>
+        <div style={{ ...row,marginBottom:0 }}>
+          <span style={{ color:'#aaa',fontSize:13 }}>세로 행 수</span>
+          <div style={{ display:'flex',alignItems:'center',gap:12 }}>
+            <button style={stBtn(rows<=1)} onClick={()=>rows>1&&set('rows',rows-1)}>−</button>
+            <span style={num}>{rows}</span>
+            <button style={stBtn(rows>=6)} onClick={()=>rows<6&&set('rows',rows+1)}>+</button>
+          </div>
+        </div>
+        <div style={{ color:'#444',fontSize:11,textAlign:'right',marginTop:8 }}>총 {cols*rows}개 패드</div>
+      </div>
+
+      {/* 녹화 시간 */}
+      <div style={{ marginBottom:24 }}>
+        <div style={sec}>최대 녹화 시간</div>
+        <div style={{ display:'flex',gap:8 }}>
+          {[1000,3000,5000].map(ms=><button key={ms} style={sBtn(maxRecMs===ms)} onClick={()=>set('maxRecMs',ms)}>{ms/1000}초</button>)}
+        </div>
+      </div>
+
+      {/* 전체 볼륨 */}
+      <div style={{ marginBottom:24 }}>
+        <div style={{ display:'flex',justifyContent:'space-between',marginBottom:10 }}>
+          <span style={sec}>전체 볼륨</span>
+          <span style={{ color:'#4CC9F0',fontSize:12,fontWeight:700 }}>{Math.round(globalVolume*100)}%</span>
+        </div>
+        <input type="range" min={0} max={1} step={0.05} value={globalVolume} onChange={e=>set('globalVolume',+e.target.value)} />
+      </div>
+
+      {/* 카메라 */}
+      <div style={{ marginBottom:32 }}>
+        <div style={sec}>카메라</div>
+        <div style={{ display:'flex',gap:8 }}>
+          <button style={sBtn(cameraFacing==='user')}        onClick={()=>set('cameraFacing','user')}>📱 전면 카메라</button>
+          <button style={sBtn(cameraFacing==='environment')} onClick={()=>set('cameraFacing','environment')}>📷 후면 카메라</button>
+        </div>
+      </div>
+
+      {/* 초기화 */}
+      <button onClick={onReset} style={{ width:'100%',padding:'14px 0',borderRadius:12,border:'none',background:'#2a0a0a',color:'#FF4D6D',fontWeight:700,fontSize:14,cursor:'pointer' }}>
+        🗑 전체 초기화
+      </button>
+    </div>
+  </>;
 }
 
-// ── App ───────────────────────────────────────────────────────
+// ── App ────────────────────────────────────────────────────────
 function App() {
-  const [cols, setCols]               = useState(4);
-  const [rows, setRows]               = useState(3);
-  const [pads, setPads]               = useState(() => Array(12).fill(null));
-  const [mode, setMode]               = useState('play');
-  const [recordingIdx, setRecordingIdx] = useState(null);
-  const [playKeys, setPlayKeys]       = useState({});
-  const [cameraReady, setCameraReady] = useState(false);
-  const [recProgress, setRecProgress] = useState(0);
-  const [countdown, setCountdown]     = useState(null); // {idx, count}
-  const [showSettings, setShowSettings] = useState(false);
-  const [editPad, setEditPad]         = useState(null);
-  const [confirmOW, setConfirmOW]     = useState(null); // {idx} overwrite
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [dragState, setDragState]     = useState(null); // {fromIdx,toIdx,x,y}
-  const [toast, setToast]             = useState(null);
-  const [loading, setLoading]         = useState(true);
-  const [maxRecMs, setMaxRecMs]       = useState(3000);
+  // Settings state
+  const [cols,         setCols]         = useState(4);
+  const [rows,         setRows]         = useState(3);
+  const [maxRecMs,     setMaxRecMs]     = useState(3000);
   const [globalVolume, setGlobalVolume] = useState(1);
   const [cameraFacing, setCameraFacing] = useState('user');
-  const [gridWidth, setGridWidth]     = useState(300);
 
-  // Refs
-  const containerRef  = useRef(null);
-  const headerRef     = useRef(null);
-  const cameraVideoRef= useRef(null);
-  const mrRef         = useRef(null);
-  const chunksRef     = useRef([]);
-  const streamRef     = useRef(null);
-  const timerRef      = useRef(null);
-  const progressRef   = useRef(null);
-  const holdTimerRef  = useRef(null);
-  const toastTimer    = useRef(null);
-  const isDraggingRef = useRef(false);  // sync flag (no re-render)
-  const ptrDownPad    = useRef(null);   // which pad pointer went down on
-  const padsRef       = useRef(pads);
-  const settingsRef   = useRef({});
+  // Core state
+  const [pads,        setPads]        = useState(() => Array(12).fill(null));
+  const [mode,        setMode]        = useState('play');
+  const [recIdx,      setRecIdx]      = useState(null);
+  const [countdown,   setCountdown]   = useState(null); // 3|2|1|null
+  const [playKeys,    setPlayKeys]    = useState({});
+  const [camReady,    setCamReady]    = useState(false);
+  const [recProg,     setRecProg]     = useState(0);
+  const [gridWidth,   setGridWidth]   = useState(300);
+  const [loading,     setLoading]     = useState(true);
 
-  // Keep refs in sync
-  useEffect(() => { padsRef.current = pads; }, [pads]);
+  // UI modals
+  const [showSettings, setShowSettings] = useState(false);
+  const [editPad,      setEditPad]      = useState(null);
+  const [confirm,      setConfirm]      = useState(null); // {msg, onOk}
+  const [toast,        setToast]        = useState(null);
+
+  // Drag state (visible)
+  const [dragFrom, setDragFrom] = useState(null);
+  const [dragTo,   setDragTo]   = useState(null);
+
+  // Refs — recording
+  const containerRef   = useRef(null);
+  const headerRef      = useRef(null);
+  const camVidRef      = useRef(null);
+  const pendingThumbRef = useRef(null);
+  const mrRef          = useRef(null);
+  const chunksRef      = useRef([]);
+  const streamRef      = useRef(null);
+  const recTimerRef    = useRef(null);
+  const progTimerRef   = useRef(null);
+  const cdTimerRef     = useRef(null);
+  const toastTimerRef  = useRef(null);
+  const saveTimerRef   = useRef(null);
+  const initializedRef = useRef(false);
+
+  // Refs — drag (avoid re-renders during move)
+  const pressRef      = useRef(null); // {idx, timer, x0, y0}
+  const dragActiveRef = useRef(false);
+  const ghostRef      = useRef(null);
+
+  // Live refs (for async callbacks)
+  const padsRef        = useRef(pads);
+  const colsRef        = useRef(cols);
+  const rowsRef        = useRef(rows);
+  const maxRecMsRef    = useRef(maxRecMs);
+  const globalVolRef   = useRef(globalVolume);
+  const camFacingRef   = useRef(cameraFacing);
+
+  useEffect(() => { padsRef.current = pads; },               [pads]);
+  useEffect(() => { colsRef.current = cols; },               [cols]);
+  useEffect(() => { rowsRef.current = rows; },               [rows]);
+  useEffect(() => { maxRecMsRef.current = maxRecMs; },       [maxRecMs]);
+  useEffect(() => { globalVolRef.current = globalVolume; },  [globalVolume]);
+  useEffect(() => { camFacingRef.current = cameraFacing; },  [cameraFacing]);
+
+  // ── Save ─────────────────────────────────────────────────────
+  const performSave = async (curPads) => {
+    const padMeta = curPads.map(p => p ? { thumb:p.thumb, label:p.label, volume:p.volume } : null);
+    await dbPut('metadata', { cols:colsRef.current, rows:rowsRef.current, maxRecMs:maxRecMsRef.current, globalVolume:globalVolRef.current, cameraFacing:camFacingRef.current, padMeta });
+    await Promise.all(curPads.map(async (p, i) => {
+      if (p?.url) { const blob = await fetch(p.url).then(r=>r.blob()); await dbPut(`blob_${i}`, blob); }
+      else await dbDel(`blob_${i}`);
+    }));
+  };
+
+  const autoSave = (curPads, quiet) => {
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      try { await performSave(curPads); if (!quiet) showToast('✅ 자동 저장됨'); }
+      catch(e) { console.error(e); }
+    }, 400);
+  };
+
+  // Settings changes → debounced auto-save
   useEffect(() => {
-    settingsRef.current = { cols, rows, maxRecMs, globalVolume, cameraFacing };
+    if (!initializedRef.current) return;
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      performSave(padsRef.current).then(() => showToast('✅ 자동 저장됨')).catch(console.error);
+    }, 1000);
   }, [cols, rows, maxRecMs, globalVolume, cameraFacing]);
 
-  // ── Load ──────────────────────────────────────────────────
+  // ── Load ─────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
       try {
         const meta = await dbGet('metadata');
         if (meta) {
           const { cols:c, rows:r, maxRecMs:mr, globalVolume:gv, cameraFacing:cf, padMeta } = meta;
-          if (c) setCols(c); if (r) setRows(r);
-          if (mr) setMaxRecMs(mr); if (gv!==undefined) setGlobalVolume(gv);
-          if (cf) setCameraFacing(cf);
-          const total = (c||4)*(r||3);
-          const newPads = Array(total).fill(null);
-          for (let i = 0; i < total; i++) {
+          if (c)               setCols(c);
+          if (r)               setRows(r);
+          if (mr)              setMaxRecMs(mr);
+          if (gv !== undefined) setGlobalVolume(gv);
+          if (cf)              setCameraFacing(cf);
+          const total = (c||4) * (r||3);
+          const np = Array(total).fill(null);
+          await Promise.all(Array.from({length:total},(_,i) => (async()=>{
             if (padMeta?.[i]) {
               const blob = await dbGet(`blob_${i}`);
-              if (blob) newPads[i] = { url:URL.createObjectURL(blob), ...padMeta[i] };
+              if (blob) np[i] = { url:URL.createObjectURL(blob), ...padMeta[i] };
             }
-          }
-          setPads(newPads);
+          })()));
+          setPads(np); padsRef.current = np;
         }
-      } catch(e) { console.error('Load error:', e); }
+      } catch(e) { console.error(e); }
       setLoading(false);
+      initializedRef.current = true;
     })();
     return () => {
-      clearTimeout(timerRef.current); clearInterval(progressRef.current);
-      streamRef.current?.getTracks().forEach(t => t.stop());
+      clearTimeout(recTimerRef.current); clearInterval(progTimerRef.current);
+      clearTimeout(cdTimerRef.current); streamRef.current?.getTracks().forEach(t=>t.stop());
     };
   }, []);
 
-  // ── Camera → video after modal renders ───────────────────
+  // ── Camera → video element ───────────────────────────────────
   useEffect(() => {
-    if (cameraReady && cameraVideoRef.current && streamRef.current) {
-      cameraVideoRef.current.srcObject = streamRef.current;
-      cameraVideoRef.current.play().catch(console.error);
+    if (camReady && camVidRef.current && streamRef.current) {
+      camVidRef.current.srcObject = streamRef.current;
+      camVidRef.current.play().catch(console.error);
     }
-  }, [cameraReady]);
+  }, [camReady]);
 
-  // ── Grid size ─────────────────────────────────────────────
+  // ── Grid size ─────────────────────────────────────────────────
   useEffect(() => {
     const compute = () => {
       const h = containerRef.current ? containerRef.current.clientHeight : window.innerHeight;
-      const hdrH = headerRef.current ? headerRef.current.offsetHeight : 70;
-      const availW = window.innerWidth - 24;
-      const availH = h - hdrH - 8;
-      const cellH = (availH - GAP*(rows-1)) / rows;
-      setGridWidth(Math.min(availW, cellH*cols + GAP*(cols-1)));
+      const hh = headerRef.current ? headerRef.current.offsetHeight : 70;
+      const aw = window.innerWidth - 24;
+      const ah = h - hh - 8;
+      const cell = (ah - GAP*(rows-1)) / rows;
+      setGridWidth(Math.min(aw, cell*cols + GAP*(cols-1)));
     };
     compute();
-    const onOrientation = () => setTimeout(compute, 200);
+    const onOrient = () => setTimeout(compute, 150);
     window.addEventListener('resize', compute);
-    window.addEventListener('orientationchange', onOrientation);
-    return () => {
-      window.removeEventListener('resize', compute);
-      window.removeEventListener('orientationchange', onOrientation);
-    };
+    window.addEventListener('orientationchange', onOrient);
+    return () => { window.removeEventListener('resize', compute); window.removeEventListener('orientationchange', onOrient); };
   }, [cols, rows]);
 
-  // ── Resize pads array ─────────────────────────────────────
+  // ── Resize pads array ────────────────────────────────────────
   useEffect(() => {
     const total = cols * rows;
     setPads(prev => {
-      const next = Array(total).fill(null);
-      for (let i = 0; i < Math.min(prev.length, total); i++) next[i] = prev[i];
-      return next;
+      const n = Array(total).fill(null);
+      for (let i=0; i<Math.min(prev.length, total); i++) n[i] = prev[i];
+      padsRef.current = n; return n;
     });
   }, [cols, rows]);
 
-  // ── Auto-save metadata on settings change ─────────────────
-  const metaTimer = useRef(null);
+  // ── Clean drag on mode change ────────────────────────────────
   useEffect(() => {
-    if (loading) return;
-    clearTimeout(metaTimer.current);
-    metaTimer.current = setTimeout(() =>
-      saveMetadata(padsRef.current, settingsRef.current).catch(console.error), 800);
-  }, [cols, rows, maxRecMs, globalVolume, cameraFacing]);
+    dragActiveRef.current = false; pressRef.current = null;
+    setDragFrom(null); setDragTo(null);
+    if (ghostRef.current) ghostRef.current.style.display = 'none';
+  }, [mode]);
 
-  // ── Countdown ─────────────────────────────────────────────
-  useEffect(() => {
-    if (!countdown) return;
-    if (countdown.count === 0) {
-      const idx = countdown.idx;
-      setCountdown(null);
-      startRecord(idx);
+  // ── Helpers ──────────────────────────────────────────────────
+  const showToast = msg => {
+    setToast(msg); clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 2200);
+  };
+
+  const setSetting = (k, v) => {
+    if (k==='cols' || k==='rows') {
+      // 패드가 잘릴 수 있는지 확인
+      const newCols = k==='cols' ? v : cols;
+      const newRows = k==='rows' ? v : rows;
+      const newTotal = newCols * newRows;
+      const willLose = padsRef.current.slice(newTotal).some(p => p);
+      if (willLose) {
+        setConfirm({
+          msg: `버튼 수를 줄이면 범위 밖에 있는 패드의 녹화 내용이 영구 삭제됩니다. 계속하시겠습니까?`,
+          onOk: () => {
+            setConfirm(null);
+            if (k==='cols') setCols(v); else setRows(v);
+          }
+        });
+        return;
+      }
+      if (k==='cols') setCols(v); else setRows(v);
       return;
     }
-    const t = setTimeout(() => setCountdown(c => c ? {...c, count:c.count-1} : null), 1000);
-    return () => clearTimeout(t);
-  }, [countdown]);
+    if (k==='maxRecMs')      setMaxRecMs(v);
+    else if (k==='globalVolume')  setGlobalVolume(v);
+    else if (k==='cameraFacing')  setCameraFacing(v);
+  };
 
-  // ── Drag global listeners ─────────────────────────────────
-  useEffect(() => {
-    if (!dragState) return;
-    const onMove = e => {
-      const pt = e.touches?.[0] || e;
-      setDragState(d => {
-        if (!d) return null;
-        const el = document.elementFromPoint(pt.clientX, pt.clientY);
-        const padEl = el?.closest('[data-pad-idx]');
-        const toIdx = padEl ? parseInt(padEl.dataset.padIdx) : d.toIdx;
-        return { ...d, x:pt.clientX, y:pt.clientY, toIdx };
+  // ── Reset ────────────────────────────────────────────────────
+  const handleReset = () => {
+    setConfirm({ msg:'모든 패드를 초기화할까요?\n녹화된 내용이 모두 삭제됩니다.', onOk: async () => {
+      setConfirm(null);
+      padsRef.current.forEach(p => { if (p?.url) URL.revokeObjectURL(p.url); });
+      await dbClear();
+      const empty = Array(cols*rows).fill(null);
+      setPads(empty); padsRef.current = empty;
+      setShowSettings(false); showToast('초기화됐습니다');
+    }});
+  };
+
+  // ── Record ───────────────────────────────────────────────────
+  const cancelRecordFlow = useCallback(() => {
+    clearTimeout(cdTimerRef.current); clearTimeout(recTimerRef.current); clearInterval(progTimerRef.current);
+    if (mrRef.current?.state !== 'inactive') mrRef.current.stop();
+    streamRef.current?.getTracks().forEach(t=>t.stop()); streamRef.current = null;
+    setCamReady(false); setCountdown(null); setRecIdx(null); setRecProg(0);
+  }, []);
+
+  const beginRecording = (stream, idx) => {
+    chunksRef.current = [];
+    const mr = new MediaRecorder(stream, getMime() ? {mimeType:getMime()} : {});
+    mrRef.current = mr;
+    mr.ondataavailable = e => { if (e.data.size>0) chunksRef.current.push(e.data); };
+    mr.onstop = () => {
+      const blob = new Blob(chunksRef.current, {type:'video/webm'});
+      const url  = URL.createObjectURL(blob);
+      // Revoke old URL
+      const old = padsRef.current[idx];
+      if (old?.url) URL.revokeObjectURL(old.url);
+      const newPad = { url, thumb:null, label:old?.label||'', volume:old?.volume??1 };
+      const np = [...padsRef.current]; np[idx] = newPad;
+      padsRef.current = np; setPads([...np]);
+      stream.getTracks().forEach(t=>t.stop()); streamRef.current = null;
+      setCamReady(false); setCountdown(null); setRecIdx(null); setRecProg(0); clearInterval(progTimerRef.current);
+      // 라이브 캡처 썸네일 사용 (WebM seek iOS 미지원 우회)
+      const thumb = pendingThumbRef.current;
+      pendingThumbRef.current = null;
+      const fp = { ...newPad, thumb };
+      const fp2 = [...padsRef.current]; fp2[idx] = fp;
+      padsRef.current = fp2; setPads([...fp2]);
+      autoSave(fp2);
+    };
+    mr.start(100); setRecIdx(idx);
+    let elapsed = 0;
+    progTimerRef.current = setInterval(() => {
+      elapsed += 100; setRecProg(elapsed / maxRecMsRef.current);
+      if (elapsed >= maxRecMsRef.current) clearInterval(progTimerRef.current);
+    }, 100);
+    recTimerRef.current = setTimeout(() => stopRecord(), maxRecMsRef.current);
+  };
+
+  const startRecordFlow = async idx => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video:{facingMode:camFacingRef.current}, audio:true });
+      streamRef.current = stream; setCamReady(true);
+      // Countdown 3→2→1
+      let c = 3; setCountdown(c);
+      await new Promise(resolve => {
+        const tick = () => { c--; if (c>0){setCountdown(c);cdTimerRef.current=setTimeout(tick,1000);}else{setCountdown(null);resolve();} };
+        cdTimerRef.current = setTimeout(tick, 1000);
       });
-    };
-    const onUp = () => {
-      isDraggingRef.current = false;
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-      setDragState(d => {
-        if (d && d.fromIdx !== d.toIdx) {
-          setPads(p => {
-            const n = [...p];
-            [n[d.fromIdx], n[d.toIdx]] = [n[d.toIdx], n[d.fromIdx]];
-            return n;
-          });
-          setTimeout(() => saveMetadata(padsRef.current, settingsRef.current).catch(console.error), 80);
-        }
-        return null;
-      });
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('touchmove', onMove, { passive:true });
-    window.addEventListener('touchend', onUp);
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('touchend', onUp);
-    };
-  }, [!!dragState]);
-
-  // ── Toast ─────────────────────────────────────────────────
-  const showToast = msg => {
-    setToast(msg);
-    clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2200);
+      beginRecording(stream, idx);
+    } catch(e) { console.error(e); cancelRecordFlow(); }
   };
 
-  // ── Settings ──────────────────────────────────────────────
-  const updateSetting = (key, val) => {
-    ({cols:setCols, rows:setRows, maxRecMs:setMaxRecMs,
-      globalVolume:setGlobalVolume, cameraFacing:setCameraFacing})[key]?.(val);
-  };
-
-  // ── Reset ─────────────────────────────────────────────────
-  const handleReset = async () => {
-    setConfirmReset(false);
-    padsRef.current.forEach(p => { if (p?.url) URL.revokeObjectURL(p.url); });
-    await dbClearAll();
-    setPads(Array(cols*rows).fill(null));
-    setPlayKeys({});
-    showToast('초기화됐습니다');
-  };
-
-  // ── Record ────────────────────────────────────────────────
   const stopRecord = useCallback(() => {
-    clearTimeout(timerRef.current); clearInterval(progressRef.current);
+    // Capture thumbnail from live camera BEFORE stopping (iOS WebM 미지원 우회)
+    const lv = camVidRef.current;
+    if (lv && lv.readyState >= 2 && lv.videoWidth > 0) {
+      try {
+        const c = document.createElement('canvas');
+        c.width = lv.videoWidth; c.height = lv.videoHeight;
+        c.getContext('2d').drawImage(lv, 0, 0);
+        pendingThumbRef.current = c.toDataURL('image/jpeg', 0.82);
+      } catch { pendingThumbRef.current = null; }
+    } else {
+      pendingThumbRef.current = null;
+    }
+    clearTimeout(recTimerRef.current); clearInterval(progTimerRef.current);
     if (mrRef.current?.state !== 'inactive') mrRef.current.stop();
   }, []);
 
-  const startRecord = useCallback(async (idx) => {
-    if (recordingIdx !== null) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video:{ facingMode:cameraFacing }, audio:true
-      });
-      streamRef.current = stream;
-      chunksRef.current = [];
-
-      const mimeType = getMimeType();
-      const mr = new MediaRecorder(stream, mimeType ? { mimeType } : {});
-      mrRef.current = mr;
-      mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = () => {
-        // Revoke old blob URL (memory leak fix)
-        const oldPad = padsRef.current[idx];
-        if (oldPad?.url) URL.revokeObjectURL(oldPad.url);
-
-        const blob = new Blob(chunksRef.current, { type:'video/webm' });
-        const url = URL.createObjectURL(blob);
-        const padData = { url, thumb:null, label:oldPad?.label||'', volume:oldPad?.volume !== undefined ? oldPad.volume : 1 };
-
-        setPads(p => { const n=[...p]; n[idx]=padData; return n; });
-        stream.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
-        setCameraReady(false); setRecordingIdx(null); setRecProgress(0);
-        clearInterval(progressRef.current);
-
-        // Auto-save blob
-        savePadBlob(idx, url).catch(console.error);
-
-        // Capture mid-frame thumbnail then save metadata
-        captureMidFrame(url, thumb => {
-          setPads(p => { const n=[...p]; if (n[idx]?.url===url) n[idx]={...n[idx], thumb}; return n; });
-          // Update ref synchronously for immediate saveMetadata call
-          const updatedPads = padsRef.current.map((p,i) => i===idx && p?.url===url ? {...p, thumb} : p);
-          saveMetadata(updatedPads, settingsRef.current).catch(console.error);
-          showToast('✅ 저장됐습니다');
-        });
-      };
-
-      mr.start(100);
-      setRecordingIdx(idx); setCameraReady(true);
-
-      let elapsed = 0;
-      progressRef.current = setInterval(() => {
-        elapsed += 100;
-        setRecProgress(elapsed / maxRecMs);
-        if (elapsed >= maxRecMs) clearInterval(progressRef.current);
-      }, 100);
-      timerRef.current = setTimeout(() => stopRecord(), maxRecMs);
-    } catch(e) {
-      console.error(e);
-      setRecordingIdx(null); setCameraReady(false);
-    }
-  }, [recordingIdx, cameraFacing, maxRecMs, stopRecord]);
-
-  // ── Play ──────────────────────────────────────────────────
-  const playPad = useCallback((idx) => {
-    if (!pads[idx]) return;
+  // ── Play ─────────────────────────────────────────────────────
+  const playPad = useCallback(idx => {
+    if (!padsRef.current[idx]) return;
     setPlayKeys(k => ({ ...k, [idx]:(k[idx]||0)+1 }));
-  }, [pads]);
+  }, []);
 
-  const stopPad = useCallback((idx) => {
+  const stopPad = useCallback(idx => {
     setPlayKeys(k => { const n={...k}; delete n[idx]; return n; });
   }, []);
 
-  // ── Pad delete / edit ─────────────────────────────────────
+  // ── Delete ────────────────────────────────────────────────────
   const deletePad = (e, idx) => {
-    e.stopPropagation();
-    stopPad(idx);
-    const pad = pads[idx];
-    if (pad?.url) URL.revokeObjectURL(pad.url); // memory leak fix
-    setPads(p => { const n=[...p]; n[idx]=null; return n; });
-    dbDel(`blob_${idx}`).catch(console.error);
-    setTimeout(() => saveMetadata(padsRef.current, settingsRef.current).catch(console.error), 60);
+    e.stopPropagation(); stopPad(idx);
+    if (padsRef.current[idx]?.url) URL.revokeObjectURL(padsRef.current[idx].url);
+    const np = [...padsRef.current]; np[idx] = null;
+    padsRef.current = np; setPads([...np]);
+    autoSave(np);
   };
 
-  const openEdit = (e, idx) => { e.stopPropagation(); setEditPad({ idx }); };
-
+  // ── Edit ──────────────────────────────────────────────────────
+  const openEdit = (e, idx) => { e.stopPropagation(); setEditPad({idx}); };
   const saveEdit = (label, volume) => {
-    const { idx } = editPad;
-    setPads(p => { const n=[...p]; if (n[idx]) n[idx]={...n[idx], label, volume}; return n; });
+    const {idx} = editPad;
+    const np = [...padsRef.current];
+    if (np[idx]) { np[idx] = {...np[idx], label, volume}; padsRef.current = np; setPads([...np]); autoSave(np); }
     setEditPad(null);
-    setTimeout(() => saveMetadata(padsRef.current, settingsRef.current).catch(console.error), 60);
   };
 
-  // ── Pad pointer handlers ──────────────────────────────────
-  const onPadDown = (e, idx) => {
-    if (mode === 'play') { playPad(idx); return; }
-    if (recordingIdx !== null) return;
-
-    ptrDownPad.current = idx;
-
-    if (pads[idx]) {
-      // Full pad: long press → drag
-      const pt = e.touches?.[0] || e;
-      const sx = pt.clientX, sy = pt.clientY;
-      holdTimerRef.current = setTimeout(() => {
-        holdTimerRef.current = null;
-        isDraggingRef.current = true;
-        navigator.vibrate?.(40);
-        setDragState({ fromIdx:idx, toIdx:idx, x:sx, y:sy });
-      }, 450);
+  // ── Drag & Drop ───────────────────────────────────────────────
+  const handleGlobalMove = e => {
+    if (dragActiveRef.current) {
+      if (ghostRef.current) {
+        ghostRef.current.style.left = (e.clientX-40)+'px';
+        ghostRef.current.style.top  = (e.clientY-40)+'px';
+      }
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const pidx = el?.closest('[data-pi]') ? parseInt(el.closest('[data-pi]').dataset.pi) : null;
+      setDragTo(pidx !== dragFrom ? pidx : null);
+      return;
+    }
+    if (pressRef.current) {
+      const dx = Math.abs(e.clientX - pressRef.current.x0);
+      const dy = Math.abs(e.clientY - pressRef.current.y0);
+      if (dx>8||dy>8) { clearTimeout(pressRef.current.timer); pressRef.current=null; }
     }
   };
 
-  const onPadUp = (e, idx) => {
-    if (mode === 'play') return;
-    if (isDraggingRef.current) { ptrDownPad.current = null; return; }
-
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
+  const handleGlobalUp = e => {
+    if (dragActiveRef.current) {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const pidx = el?.closest('[data-pi]') ? parseInt(el.closest('[data-pi]').dataset.pi) : null;
+      if (pidx !== null && pidx !== dragFrom) {
+        const np = [...padsRef.current];
+        [np[dragFrom], np[pidx]] = [np[pidx], np[dragFrom]];
+        padsRef.current = np; setPads([...np]); autoSave(np);
+      }
+      dragActiveRef.current = false;
+      if (ghostRef.current) ghostRef.current.style.display = 'none';
+      setDragFrom(null); setDragTo(null); pressRef.current = null;
+      return;
     }
-
-    if (ptrDownPad.current !== idx) { ptrDownPad.current = null; return; }
-    ptrDownPad.current = null;
-
-    // Short tap
-    if (pads[idx]) {
-      setConfirmOW({ idx });
-    } else {
-      if (recordingIdx === null) setCountdown({ idx, count:3 });
+    if (pressRef.current) {
+      const {idx} = pressRef.current;
+      clearTimeout(pressRef.current.timer); pressRef.current = null;
+      // Tap = record
+      if (recIdx !== null) return; // already recording
+      if (padsRef.current[idx]) {
+        setConfirm({ msg:'패드를 다시 녹화할까요?\n기존 녹화가 삭제됩니다.', onOk:() => { setConfirm(null); startRecordFlow(idx); } });
+      } else {
+        startRecordFlow(idx);
+      }
     }
   };
 
-  const onPadCancel = () => {
-    clearTimeout(holdTimerRef.current);
-    holdTimerRef.current = null;
-    ptrDownPad.current = null;
+  const handlePadDown = (e, idx) => {
+    if (mode==='play') { playPad(idx); return; }
+    if (recIdx !== null) return;
+    const x0=e.clientX, y0=e.clientY;
+    const timer = setTimeout(() => {
+      // Long press → drag
+      dragActiveRef.current = true; setDragFrom(idx);
+      if (ghostRef.current) {
+        const p = padsRef.current[idx];
+        ghostRef.current.style.display = 'block';
+        ghostRef.current.style.left = (x0-40)+'px';
+        ghostRef.current.style.top  = (y0-40)+'px';
+        ghostRef.current.style.background = p?.thumb ? `url(${p.thumb}) center/cover` : `${pColor(idx)}44`;
+        ghostRef.current.style.borderColor = pColor(idx);
+      }
+      navigator.vibrate?.(50); pressRef.current = null;
+    }, 450);
+    pressRef.current = {idx, timer, x0, y0};
   };
 
   const total = cols * rows;
-
-  if (loading) return (
-    <div style={{ height:'100dvh', display:'flex', alignItems:'center', justifyContent:'center', color:'#555', fontSize:14 }}>
-      불러오는 중...
-    </div>
-  );
+  if (loading) return <div style={{ height:'100dvh',display:'flex',alignItems:'center',justifyContent:'center',color:'#555',fontSize:14 }}>불러오는 중...</div>;
 
   return (
-    <div ref={containerRef} style={{ height:'100dvh', display:'flex', flexDirection:'column', alignItems:'center', padding:'0 12px 0', overflow:'hidden' }}>
+    <div ref={containerRef} onPointerMove={handleGlobalMove} onPointerUp={handleGlobalUp}
+      style={{ height:'100dvh',display:'flex',flexDirection:'column',alignItems:'center',padding:'0 12px 0',overflow:'hidden' }}>
 
       {/* Header */}
-      <div ref={headerRef} style={{ width:'100%', maxWidth:gridWidth, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 0 12px', gap:8, flexShrink:0 }}>
+      <div ref={headerRef} style={{ width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 0 12px',gap:8,flexShrink:0 }}>
         <div>
-          <div style={{ color:'#fff', fontSize:18, fontWeight:800, letterSpacing:-0.5 }}>
-            🎛 사운드 패드 <span style={{ fontSize:11, color:'#4CC9F0', fontWeight:700, verticalAlign:'middle' }}>Beta</span>
+          <div style={{ color:'#fff',fontSize:18,fontWeight:800,letterSpacing:-0.5 }}>
+            🎛 사운드 패드 <span style={{ fontSize:11,color:'#4CC9F0',fontWeight:700,verticalAlign:'middle' }}>Beta</span>
           </div>
-          <div style={{ color:'#555', fontSize:10, marginTop:2 }}>
-            {mode==='record' ? (dragState ? '드롭할 위치로 이동' : '탭: 녹음  |  길게: 순서변경') : '패드를 눌러 재생'}
+          <div style={{ color:'#555',fontSize:10,marginTop:2 }}>
+            {mode==='record' ? (dragFrom!==null ? '놓을 위치로 이동' : '탭: 녹화 | 꾹: 순서 변경') : '패드를 눌러 재생'}
           </div>
         </div>
-        <div style={{ display:'flex', gap:7, alignItems:'center' }}>
-          <button onClick={() => setShowSettings(true)} style={{ width:38, height:38, borderRadius:10, border:'1px solid #2a2a3e', background:'#1A1A2E', color:'#aaa', fontSize:16, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>⚙️</button>
-          <button onClick={() => setMode(m => m==='play'?'record':'play')} style={{ height:38, padding:'0 14px', borderRadius:50, border:'none', background: mode==='record'?'linear-gradient(135deg,#FF4D6D,#FF6B35)':'linear-gradient(135deg,#06D6A0,#4CC9F0)', color:'#fff', fontWeight:700, fontSize:12, cursor:'pointer', boxShadow: mode==='record'?'0 0 16px rgba(255,77,109,0.5)':'0 0 16px rgba(6,214,160,0.4)' }}>
-            {mode==='record' ? '🔴 녹음' : '▶ 재생'}
+        <div style={{ display:'flex',gap:7,alignItems:'center' }}>
+          <button onClick={()=>setShowSettings(true)} style={{ width:38,height:38,borderRadius:10,border:'1px solid #2a2a3e',background:'#1A1A2E',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>⚙️</button>
+          <button onClick={()=>setMode(m=>m==='play'?'record':'play')} style={{ height:38,padding:'0 14px',borderRadius:50,border:'none',background:mode==='record'?'linear-gradient(135deg,#FF4D6D,#FF6B35)':'linear-gradient(135deg,#06D6A0,#4CC9F0)',color:'#fff',fontWeight:700,fontSize:12,cursor:'pointer',boxShadow:mode==='record'?'0 0 16px rgba(255,77,109,0.5)':'0 0 16px rgba(6,214,160,0.4)' }}>
+            {mode==='record' ? '🔴 녹화' : '▶ 재생'}
           </button>
         </div>
       </div>
 
       {/* Grid */}
-      <div style={{ display:'grid', gridTemplateColumns:`repeat(${cols},1fr)`, gap:GAP, width:gridWidth, transition:'width 0.3s ease' }}>
-        {Array.from({ length:total }, (_, i) => {
-          const pad = pads[i];
-          const isRec = recordingIdx === i;
-          const playKey = playKeys[i];
-          const isPlay = !!playKey;
-          const isDragFrom = dragState?.fromIdx === i;
-          const isDragTo = dragState && dragState.toIdx===i && dragState.fromIdx!==i;
-          const color = pc(i);
-          const padVol = (pad?.volume!==undefined ? pad.volume : 1) * globalVolume;
-
+      <div style={{ display:'grid',gridTemplateColumns:`repeat(${cols},1fr)`,gap:GAP,width:gridWidth,flexShrink:0 }}>
+        {Array.from({length:total},(_,i) => {
+          const pad=pads[i], isRec=recIdx===i, playKey=playKeys[i], isPlay=!!playKey;
+          const color=pColor(i), vol=(pad?.volume??1)*globalVolume;
+          const isDragFrom=dragFrom===i, isDragTo=dragTo===i;
           return (
-            <div
-              key={i}
-              data-pad-idx={i}
-              onPointerDown={e => onPadDown(e, i)}
-              onPointerUp={e => onPadUp(e, i)}
-              onPointerCancel={onPadCancel}
-              style={{
-                aspectRatio:'1', borderRadius:16,
-                background: pad?.thumb && !isPlay && !isDragFrom
-                  ? `url(${pad.thumb}) center/cover` : `${color}22`,
-                border: isRec ? `2.5px solid #FF4D6D`
-                  : isDragTo ? `2.5px dashed #4CC9F0`
-                  : isPlay ? `2.5px solid ${color}`
-                  : `2px solid ${color}44`,
-                display:'flex', alignItems:'center', justifyContent:'center',
-                cursor: mode==='record' ? (pad?'grab':'pointer') : 'pointer',
-                position:'relative', overflow:'hidden',
-                transition:'transform 0.08s, box-shadow 0.08s, opacity 0.12s',
-                transform: isPlay ? 'scale(0.93)' : isDragFrom ? 'scale(0.85)' : 'scale(1)',
-                opacity: isDragFrom ? 0.35 : 1,
-                boxShadow: isDragTo ? '0 0 22px rgba(76,201,240,0.65)'
-                  : isPlay ? `0 0 28px ${color}aa`
-                  : isRec ? '0 0 24px rgba(255,77,109,0.6)' : 'none',
-                touchAction:'none',
-              }}
-            >
-              {pad && isPlay && <PadVideo key={playKey} url={pad.url} volume={padVol} onEnd={() => stopPad(i)} />}
+            <div key={i} data-pi={i} onPointerDown={e=>handlePadDown(e,i)} style={{
+              aspectRatio:'1', borderRadius:16,
+              background: pad?.thumb&&!isPlay ? `url(${pad.thumb}) center/cover` : `${color}22`,
+              border: isDragTo?`2.5px solid #fff` : isRec?`2.5px solid #FF4D6D` : isPlay?`2.5px solid ${color}` : `2px solid ${color}44`,
+              display:'flex',alignItems:'center',justifyContent:'center',
+              cursor:'pointer',position:'relative',overflow:'hidden',
+              transition:'transform 0.08s,box-shadow 0.08s,opacity 0.12s',
+              transform: isPlay?'scale(0.93)':isDragFrom?'scale(0.85)':'scale(1)',
+              opacity: isDragFrom ? 0.35 : 1,
+              boxShadow: isDragTo?'0 0 28px rgba(255,255,255,0.5)' : isPlay?`0 0 28px ${color}aa` : isRec?'0 0 24px rgba(255,77,109,0.6)' : 'none',
+              touchAction:'none',
+            }}>
+              {pad&&isPlay&&<PadVideo key={playKey} url={pad.url} volume={vol} onEnd={()=>stopPad(i)} />}
+              {isPlay&&<div style={{ position:'absolute',inset:0,zIndex:2,pointerEvents:'none',background:`linear-gradient(to top,${color}55 0%,transparent 60%)`,borderRadius:14 }} />}
 
-              {isPlay && <div style={{ position:'absolute', inset:0, zIndex:2, pointerEvents:'none', background:`linear-gradient(to top,${color}55 0%,transparent 60%)`, borderRadius:14 }} />}
-
-              {!pad && (
-                <div style={{ textAlign:'center', position:'relative', zIndex:2 }}>
-                  <div style={{ fontSize:cols>=6?18:26 }}>{pe(i)}</div>
-                  {mode==='record' && <div style={{ color, fontSize:9, fontWeight:700, marginTop:3 }}>탭하여 녹음</div>}
+              {!pad&&(
+                <div style={{ textAlign:'center',position:'relative',zIndex:2 }}>
+                  <div style={{ fontSize:cols>=6?16:24 }}>{pEmoji(i)}</div>
+                  {mode==='record'&&<div style={{ color,fontSize:9,fontWeight:700,marginTop:3,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:'90%' }}>탭하여 녹화</div>}
                 </div>
               )}
 
-              {pad && !isPlay && !isRec && <div style={{ position:'absolute', inset:0, zIndex:2, background:'linear-gradient(to top,rgba(0,0,0,0.55) 0%,transparent 55%)', borderRadius:14 }} />}
+              {pad&&!isPlay&&!isRec&&<div style={{ position:'absolute',inset:0,zIndex:2,background:'linear-gradient(to top,rgba(0,0,0,0.55) 0%,transparent 55%)',borderRadius:14 }} />}
 
-              {/* REC badge */}
-              {isRec && (
-                <div style={{ position:'absolute', top:6, left:6, zIndex:5, display:'flex', alignItems:'center', gap:3, background:'rgba(0,0,0,0.8)', borderRadius:20, padding:'2px 7px' }}>
-                  <div style={{ width:6, height:6, borderRadius:'50%', background:'#FF4D6D', animation:'blink 0.5s alternate infinite' }} />
-                  <span style={{ color:'#FF4D6D', fontSize:9, fontWeight:700 }}>REC</span>
+              {isRec&&(
+                <div style={{ position:'absolute',top:6,left:6,zIndex:5,display:'flex',alignItems:'center',gap:3,background:'rgba(0,0,0,0.8)',borderRadius:20,padding:'2px 7px' }}>
+                  <div style={{ width:6,height:6,borderRadius:'50%',background:'#FF4D6D',animation:'blink 0.5s alternate infinite' }} />
+                  <span style={{ color:'#FF4D6D',fontSize:9,fontWeight:700 }}>REC</span>
                 </div>
               )}
 
-              {/* Record mode controls */}
-              {pad && mode==='record' && !isRec && !isDragFrom && (
+              {pad&&mode==='record'&&!isRec&&!isDragFrom&&(
                 <>
-                  <button onPointerDown={e => deletePad(e,i)} style={{ position:'absolute', top:5, right:5, zIndex:10, width:20, height:20, borderRadius:'50%', background:'rgba(0,0,0,0.8)', border:'none', color:'#fff', fontSize:11, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
-                  <button onPointerDown={e => openEdit(e,i)} style={{ position:'absolute', top:5, left:5, zIndex:10, width:20, height:20, borderRadius:'50%', background:'rgba(0,0,0,0.8)', border:'none', color:'#4CC9F0', fontSize:11, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>✏️</button>
+                  <button onPointerDown={e=>deletePad(e,i)} style={{ position:'absolute',top:5,right:5,zIndex:10,width:20,height:20,borderRadius:'50%',background:'rgba(0,0,0,0.8)',border:'none',color:'#fff',fontSize:11,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>✕</button>
+                  <button onPointerDown={e=>openEdit(e,i)}  style={{ position:'absolute',top:5,left:5,zIndex:10,width:20,height:20,borderRadius:'50%',background:'rgba(0,0,0,0.8)',border:'none',color:'#4CC9F0',fontSize:11,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>✏️</button>
                 </>
               )}
 
-              {/* Label */}
-              {pad?.label && !isRec && (
-                <div style={{ position:'absolute', bottom:0, left:0, right:0, zIndex:3, padding:'4px 6px', textAlign:'center', color:'#fff', fontSize:cols>=6?9:11, fontWeight:700, textShadow:'0 1px 4px rgba(0,0,0,0.8)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                  {pad.label}
-                </div>
+              {pad?.label&&!isRec&&!isDragFrom&&(
+                <div style={{ position:'absolute',bottom:0,left:0,right:0,zIndex:3,padding:'4px 6px',textAlign:'center',color:'#fff',fontSize:cols>=6?11:14,fontWeight:700,textShadow:'0 1px 4px rgba(0,0,0,0.8)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}>{pad.label}</div>
               )}
             </div>
           );
@@ -730,71 +662,49 @@ function App() {
       </div>
 
       {/* Drag Ghost */}
-      {dragState && (() => {
-        const pad = pads[dragState.fromIdx];
-        const color = pc(dragState.fromIdx);
-        return (
-          <div style={{ position:'fixed', left:dragState.x-42, top:dragState.y-42, width:84, height:84, borderRadius:16, background: pad?.thumb ? `url(${pad.thumb}) center/cover` : `${color}88`, border:`2px solid ${color}`, boxShadow:`0 12px 40px rgba(0,0,0,0.7), 0 0 24px ${color}55`, pointerEvents:'none', zIndex:60, transform:'scale(1.1) rotate(3deg)' }} />
-        );
-      })()}
+      <div ref={ghostRef} style={{ display:'none',position:'fixed',width:80,height:80,borderRadius:14,border:'2px solid #fff',opacity:0.85,pointerEvents:'none',zIndex:999,backgroundSize:'cover',backgroundPosition:'center' }} />
 
-      {/* Countdown */}
-      {countdown && <CountdownOverlay count={countdown.count} onCancel={() => setCountdown(null)} />}
-
-      {/* Camera Modal */}
-      {cameraReady && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.92)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:300, gap:16 }}>
-          <div style={{ color:'#FF4D6D', fontWeight:800, fontSize:15, letterSpacing:2 }}>🔴 녹음 중</div>
-          <video ref={cameraVideoRef} muted autoPlay playsInline style={{ width:280, height:210, borderRadius:16, border:'2px solid #FF4D6D', background:'#000', objectFit:'cover', boxShadow:'0 0 40px rgba(255,77,109,0.4)', transform: cameraFacing==='user'?'scaleX(-1)':'none' }} />
-          <div style={{ width:280, height:5, background:'#222', borderRadius:3, overflow:'hidden' }}>
-            <div style={{ height:'100%', width:`${recProgress*100}%`, background:'linear-gradient(90deg,#FF4D6D,#FF6B35)', borderRadius:3, transition:'width 0.1s linear' }} />
+      {/* Camera + Countdown Modal */}
+      {camReady&&(
+        <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.93)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',zIndex:300,gap:14 }}>
+          <div style={{ color:countdown!==null?'#4CC9F0':'#FF4D6D',fontWeight:800,fontSize:14,letterSpacing:2 }}>
+            {countdown!==null ? '녹화 준비...' : '🔴 녹화 중'}
           </div>
-          <div style={{ color:'#555', fontSize:11 }}>{maxRecMs/1000}초 최대 · 완료 시 자동 저장</div>
-          <button onClick={stopRecord} style={{ padding:'12px 32px', borderRadius:50, border:'none', background:'linear-gradient(135deg,#FF4D6D,#FF6B35)', color:'#fff', fontWeight:800, fontSize:14, cursor:'pointer', boxShadow:'0 0 24px rgba(255,77,109,0.5)' }}>⏹ 녹음 완료</button>
+
+          <div style={{ position:'relative',width:280,height:210 }}>
+            <video ref={camVidRef} muted autoPlay playsInline style={{
+              width:'100%',height:'100%',borderRadius:16,
+              border:`2px solid ${countdown!==null?'#4CC9F0':'#FF4D6D'}`,
+              background:'#000',objectFit:'cover',
+              boxShadow:`0 0 40px ${countdown!==null?'rgba(76,201,240,0.4)':'rgba(255,77,109,0.4)'}`,
+              transform:cameraFacing==='user'?'scaleX(-1)':'none',
+            }} />
+            {countdown!==null&&(
+              <div style={{ position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.3)',borderRadius:14 }}>
+                <div key={countdown} style={{ fontSize:88,fontWeight:900,color:'#fff',textShadow:'0 0 40px rgba(76,201,240,0.9)',position:'absolute',top:'50%',left:'50%',animation:'countPop 0.7s ease-out forwards' }}>
+                  {countdown}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {countdown===null&&(
+            <>
+              <div style={{ width:280,height:5,background:'#222',borderRadius:3,overflow:'hidden' }}>
+                <div style={{ height:'100%',width:`${recProg*100}%`,background:'linear-gradient(90deg,#FF4D6D,#FF6B35)',borderRadius:3,transition:'width 0.1s linear' }} />
+              </div>
+              <div style={{ color:'#555',fontSize:11 }}>{maxRecMs/1000}초 최대 · 완료 후 자동 저장</div>
+              <button onClick={stopRecord} style={{ padding:'12px 32px',borderRadius:50,border:'none',background:'linear-gradient(135deg,#FF4D6D,#FF6B35)',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',boxShadow:'0 0 24px rgba(255,77,109,0.5)' }}>⏹ 녹화 완료</button>
+            </>
+          )}
+          <button onClick={cancelRecordFlow} style={{ background:'none',border:'none',color:'#555',fontSize:13,cursor:'pointer' }}>취소</button>
         </div>
       )}
 
-      {/* Settings */}
-      <SettingsPanel
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
-        settings={{ cols, rows, maxRecMs, globalVolume, cameraFacing }}
-        update={updateSetting}
-        onResetClick={() => { setShowSettings(false); setConfirmReset(true); }}
-      />
-
-      {/* Confirm: overwrite */}
-      {confirmOW && (
-        <ConfirmModal
-          title="패드 덮어쓰기"
-          msg="이미 녹음된 패드입니다. 새로 녹음하면 기존 내용이 삭제됩니다."
-          okLabel="새로 녹음"
-          onOk={() => { const idx=confirmOW.idx; setConfirmOW(null); setCountdown({idx,count:3}); }}
-          onCancel={() => setConfirmOW(null)}
-        />
-      )}
-
-      {/* Confirm: reset */}
-      {confirmReset && (
-        <ConfirmModal
-          title="전체 초기화"
-          msg="모든 패드의 녹음 내용이 삭제됩니다. 계속하시겠습니까?"
-          okLabel="초기화"
-          onOk={handleReset}
-          onCancel={() => setConfirmReset(false)}
-        />
-      )}
-
-      {/* Pad edit */}
-      {editPad && (
-        <PadEditModal
-          pad={pads[editPad.idx]}
-          onSave={saveEdit}
-          onClose={() => setEditPad(null)}
-        />
-      )}
-
-      {toast && <Toast msg={toast} />}
+      <Settings open={showSettings} onClose={()=>setShowSettings(false)} cfg={{cols,rows,maxRecMs,globalVolume,cameraFacing}} set={setSetting} onReset={handleReset} />
+      {editPad&&<EditModal pad={pads[editPad.idx]} onSave={saveEdit} onClose={()=>setEditPad(null)} />}
+      {confirm&&<Confirm msg={confirm.msg} onOk={confirm.onOk} onCancel={()=>setConfirm(null)} />}
+      {toast&&<Toast msg={toast} />}
     </div>
   );
 }
