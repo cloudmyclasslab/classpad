@@ -217,14 +217,19 @@ function HelpPanel({ open, onClose }) {
   return <>
     <div onClick={onClose} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:200 }} />
     <div onMouseMove={hMove} onMouseUp={hUp} onTouchMove={hMove} onTouchEnd={hUp}
-      style={{ position:'fixed',bottom:0,left:0,right:0,background:'#111128',borderRadius:'20px 20px 0 0',padding:'0 24px 44px',zIndex:201,animation:ty===0?'slideUp 0.25s ease-out':'none',transform:`translateY(${ty}px)`,transition:dg.current.on?'none':'transform 0.25s ease-out',maxHeight:'88vh',overflowY:'auto' }}>
-      <div onMouseDown={hDown} onTouchStart={hDown} style={{ width:'100%',padding:'16px 0 20px',cursor:'grab',touchAction:'none' }}>
-        <div style={{ width:40,height:4,background:'#444',borderRadius:2,margin:'0 auto' }} />
+      style={{ position:'fixed',bottom:0,left:0,right:0,background:'#111128',borderRadius:'20px 20px 0 0',zIndex:201,animation:ty===0?'slideUp 0.25s ease-out':'none',transform:`translateY(${ty}px)`,transition:dg.current.on?'none':'transform 0.25s ease-out',maxHeight:'calc(100dvh - 100px)',display:'flex',flexDirection:'column' }}>
+      {/* 고정 헤더: 드래그 핸들 + 제목 */}
+      <div style={{ flexShrink:0,background:'#111128',borderRadius:'20px 20px 0 0',padding:'0 24px 0' }}>
+        <div onMouseDown={hDown} onTouchStart={hDown} style={{ width:'100%',padding:'16px 0 14px',cursor:'grab',touchAction:'none' }}>
+          <div style={{ width:40,height:4,background:'#555',borderRadius:2,margin:'0 auto' }} />
+        </div>
+        <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',paddingBottom:20 }}>
+          <span style={{ color:'#fff',fontWeight:800,fontSize:16 }}>📖 사용방법</span>
+          <button onClick={onClose} style={{ width:32,height:32,borderRadius:'50%',border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>✕</button>
+        </div>
       </div>
-      <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:28 }}>
-        <span style={{ color:'#fff',fontWeight:800,fontSize:16 }}>📖 사용방법</span>
-        <button onClick={onClose} style={{ background:'none',border:'none',color:'#555',fontSize:20,cursor:'pointer' }}>✕</button>
-      </div>
+      {/* 스크롤 영역 */}
+      <div style={{ overflowY:'auto',flex:1,padding:'0 24px 44px' }}>
 
       {/* 기본 모드 */}
       <span style={sec}>🔹 기본 모드</span>
@@ -268,6 +273,7 @@ function HelpPanel({ open, onClose }) {
       <button onClick={onClose} style={{ width:'100%',marginTop:20,padding:'13px 0',borderRadius:12,border:'none',background:'linear-gradient(135deg,#4CC9F0,#4361EE)',color:'#fff',fontWeight:700,fontSize:14,cursor:'pointer' }}>
         확인
       </button>
+      </div>{/* end scroll area */}
     </div>
   </>;
 }
@@ -290,14 +296,19 @@ function Settings({ open, onClose, cfg, set, onReset }) {
   return <>
     <div onClick={onClose} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:200 }} />
     <div onMouseMove={hMove} onMouseUp={hUp} onTouchMove={hMove} onTouchEnd={hUp}
-      style={{ position:'fixed',bottom:0,left:0,right:0,background:'#111128',borderRadius:'20px 20px 0 0',padding:'24px 24px 44px',zIndex:201,animation:ty===0?'slideUp 0.25s ease-out':'none',transform:`translateY(${ty}px)`,transition:dg.current.on?'none':'transform 0.25s ease-out',maxHeight:'90vh',overflowY:'auto' }}>
-      <div onMouseDown={hDown} onTouchStart={hDown} style={{ width:'100%',padding:'0 0 20px',cursor:'grab',touchAction:'none' }}>
-        <div style={{ width:40,height:4,background:'#444',borderRadius:2,margin:'0 auto' }} />
+      style={{ position:'fixed',bottom:0,left:0,right:0,background:'#111128',borderRadius:'20px 20px 0 0',zIndex:201,animation:ty===0?'slideUp 0.25s ease-out':'none',transform:`translateY(${ty}px)`,transition:dg.current.on?'none':'transform 0.25s ease-out',maxHeight:'calc(100dvh - 100px)',display:'flex',flexDirection:'column' }}>
+      {/* 고정 헤더 */}
+      <div style={{ flexShrink:0,background:'#111128',borderRadius:'20px 20px 0 0',padding:'0 24px 0' }}>
+        <div onMouseDown={hDown} onTouchStart={hDown} style={{ width:'100%',padding:'16px 0 14px',cursor:'grab',touchAction:'none' }}>
+          <div style={{ width:40,height:4,background:'#555',borderRadius:2,margin:'0 auto' }} />
+        </div>
+        <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',paddingBottom:20 }}>
+          <span style={{ color:'#fff',fontWeight:800,fontSize:16 }}>⚙️ 환경설정</span>
+          <button onClick={onClose} style={{ width:32,height:32,borderRadius:'50%',border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>✕</button>
+        </div>
       </div>
-      <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:28 }}>
-        <span style={{ color:'#fff',fontWeight:800,fontSize:16 }}>⚙️ 환경설정</span>
-        <button onClick={onClose} style={{ background:'none',border:'none',color:'#555',fontSize:20,cursor:'pointer' }}>✕</button>
-      </div>
+      {/* 스크롤 영역 */}
+      <div style={{ overflowY:'auto',flex:1,padding:'0 24px 44px' }}>
 
       {/* 기록 방식 */}
       <div style={{ marginBottom:24 }}>
@@ -360,6 +371,7 @@ function Settings({ open, onClose, cfg, set, onReset }) {
       <button onClick={onReset} style={{ width:'100%',padding:'14px 0',borderRadius:12,border:'none',background:'#2a0a0a',color:'#FF4D6D',fontWeight:700,fontSize:14,cursor:'pointer' }}>
         🗑 전체 초기화
       </button>
+      </div>{/* end scroll area */}
     </div>
   </>;
 }
