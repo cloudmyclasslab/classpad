@@ -315,7 +315,6 @@ function App() {
   const cameraVideoRef = useRef(null);
   const timerRef = useRef(null);
   const progressRef = useRef(null);
-  const pendingThumbRef = useRef(null);
   const toastTimerRef = useRef(null);
 
   // ── Load from DB on mount ──
@@ -361,16 +360,17 @@ function App() {
   useEffect(() => {
     const HEADER = 80, HINT = 60;
     const compute = () => {
-      if (sizeMode === 'fixed') { setGridWidth(MIN_GRID); return; }
       const availW = window.innerWidth - 24;
+      if (sizeMode === 'fixed') { setGridWidth(Math.min(MIN_GRID, availW)); return; }
       const availH = window.innerHeight - HEADER - HINT;
       const cellByH = (availH - GAP*(rows-1)) / rows;
       const wByH = cellByH * cols + GAP*(cols-1);
-      setGridWidth(Math.max(MIN_GRID, Math.min(availW, wByH)));
+      setGridWidth(Math.min(availW, Math.max(Math.min(MIN_GRID, availW), wByH)));
     };
     compute();
     window.addEventListener('resize', compute);
-    return () => window.removeEventListener('resize', compute);
+    window.addEventListener('orientationchange', () => setTimeout(compute, 100));
+    return () => { window.removeEventListener('resize', compute); window.removeEventListener('orientationchange', compute); };
   }, [sizeMode, cols, rows]);
 
   // ── Resize pads array when grid changes ──
@@ -434,18 +434,27 @@ function App() {
   };
 
   // ── Record ──
-  const stopRecord = useCallback(() => {
-    const lv = cameraVideoRef.current;
-    if (lv && lv.readyState >= 2 && lv.videoWidth > 0) {
+  // 녹화된 blob의 중간 지점 프레임을 썸네일로 추출
+  function captureMidFrame(url, cb) {
+    const vid = document.createElement('video');
+    vid.src = url;
+    vid.muted = true;
+    vid.preload = 'metadata';
+    vid.onloadedmetadata = () => { vid.currentTime = Math.max(0.1, vid.duration / 2); };
+    vid.onseeked = () => {
       try {
         const c = document.createElement('canvas');
-        c.width = lv.videoWidth; c.height = lv.videoHeight;
-        c.getContext('2d').drawImage(lv, 0, 0);
-        pendingThumbRef.current = c.toDataURL('image/jpeg', 0.8);
-      } catch { pendingThumbRef.current = null; }
-    } else {
-      pendingThumbRef.current = null;
-    }
+        c.width = vid.videoWidth || 320;
+        c.height = vid.videoHeight || 240;
+        c.getContext('2d').drawImage(vid, 0, 0, c.width, c.height);
+        cb(c.toDataURL('image/jpeg', 0.85));
+      } catch { cb(null); }
+      vid.src = '';
+    };
+    vid.onerror = () => cb(null);
+  }
+
+  const stopRecord = useCallback(() => {
     clearTimeout(timerRef.current);
     clearInterval(progressRef.current);
     if (mrRef.current?.state !== 'inactive') mrRef.current.stop();
@@ -470,22 +479,25 @@ function App() {
       mrRef.current = mr;
       mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mr.onstop = () => {
-        const thumb = pendingThumbRef.current;
-        pendingThumbRef.current = null;
         const blob = new Blob(chunksRef.current, { type: 'video/webm' });
         const url = URL.createObjectURL(blob);
-        setPads(p => {
-          const n = [...p];
-          const existing = n[idx];
-          n[idx] = { url, thumb, label: existing?.label || '', volume: existing?.volume !== undefined ? existing.volume : 1 };
-          return n;
-        });
+        // 스트림 먼저 종료 후 중간 프레임 비동기 추출
         stream.getTracks().forEach(t => t.stop());
         streamRef.current = null;
         setCameraReady(false);
         setRecordingIdx(null);
         setRecProgress(0);
         clearInterval(progressRef.current);
+        // 일단 thumb 없이 저장 후, 추출 완료되면 업데이트
+        setPads(p => {
+          const n = [...p];
+          const existing = n[idx];
+          n[idx] = { url, thumb: null, label: existing?.label || '', volume: existing?.volume !== undefined ? existing.volume : 1 };
+          return n;
+        });
+        captureMidFrame(url, thumb => {
+          if (thumb) setPads(p => { const n = [...p]; if (n[idx]?.url === url) n[idx] = { ...n[idx], thumb }; return n; });
+        });
       };
 
       mr.start(100);
@@ -655,9 +667,6 @@ function App() {
         })}
       </div>
 
-      <div style={{ marginTop:14, color:'#444', fontSize:11, textAlign:'center', lineHeight:1.8, width:gridWidth }}>
-        {mode === 'record' ? '탭: 녹음 | ✏️: 이름·볼륨 편집 | ✕: 삭제' : '패드를 빠르게 눌러 비트를 만들어 보세요!'}
-      </div>
 
       {/* Camera Modal */}
       {cameraReady && (
