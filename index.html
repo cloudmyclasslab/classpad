@@ -170,7 +170,7 @@ function PadEditModal({ pad, idx, onSave, onClose }) {
 // ── Settings Panel ─────────────────────────────────────────────
 function SettingsPanel({ open, onClose, settings, update, onReset }) {
   if (!open) return null;
-  const { sizeMode, cols, rows, maxRecMs, globalVolume, cameraFacing } = settings;
+  const { cols, rows, maxRecMs, globalVolume, cameraFacing } = settings;
 
   const sBtn = active => ({
     flex:1, padding:'8px 0', borderRadius:8, border:'none', cursor:'pointer',
@@ -202,15 +202,6 @@ function SettingsPanel({ open, onClose, settings, update, onReset }) {
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:28 }}>
           <span style={{ color:'#fff', fontWeight:800, fontSize:16 }}>⚙️ 환경설정</span>
           <button onClick={onClose} style={{ background:'none', border:'none', color:'#555', fontSize:20, cursor:'pointer' }}>✕</button>
-        </div>
-
-        {/* 화면 크기 */}
-        <div style={{ marginBottom:24 }}>
-          <div style={section}>화면 크기</div>
-          <div style={{ display:'flex', gap:8 }}>
-            <button style={sBtn(sizeMode==='fixed')} onClick={() => update('sizeMode','fixed')}>고정 (현재 크기)</button>
-            <button style={sBtn(sizeMode==='proportional')} onClick={() => update('sizeMode','proportional')}>창 크기에 맞춤</button>
-          </div>
         </div>
 
         {/* 버튼 배치 */}
@@ -287,7 +278,6 @@ function App() {
   // Grid & settings
   const [cols, setCols] = useState(4);
   const [rows, setRows] = useState(3);
-  const [sizeMode, setSizeMode] = useState('fixed');
   const [maxRecMs, setMaxRecMs] = useState(3000);
   const [globalVolume, setGlobalVolume] = useState(1);
   const [cameraFacing, setCameraFacing] = useState('user');
@@ -324,12 +314,11 @@ function App() {
         const meta = await dbGet('metadata');
         if (!meta) { setLoading(false); return; }
 
-        const { cols: c, rows: r, sizeMode: sm, maxRecMs: mr, globalVolume: gv,
+        const { cols: c, rows: r, maxRecMs: mr, globalVolume: gv,
                 cameraFacing: cf, padMeta } = meta;
 
         if (c) setCols(c);
         if (r) setRows(r);
-        if (sm) setSizeMode(sm);
         if (mr) setMaxRecMs(mr);
         if (gv !== undefined) setGlobalVolume(gv);
         if (cf) setCameraFacing(cf);
@@ -361,7 +350,6 @@ function App() {
     const HEADER = 80, HINT = 60;
     const compute = () => {
       const availW = window.innerWidth - 24;
-      if (sizeMode === 'fixed') { setGridWidth(Math.min(MIN_GRID, availW)); return; }
       const availH = window.innerHeight - HEADER - HINT;
       const cellByH = (availH - GAP*(rows-1)) / rows;
       const wByH = cellByH * cols + GAP*(cols-1);
@@ -371,7 +359,7 @@ function App() {
     window.addEventListener('resize', compute);
     window.addEventListener('orientationchange', () => setTimeout(compute, 100));
     return () => { window.removeEventListener('resize', compute); window.removeEventListener('orientationchange', compute); };
-  }, [sizeMode, cols, rows]);
+  }, [cols, rows]);
 
   // ── Resize pads array when grid changes ──
   useEffect(() => {
@@ -387,7 +375,6 @@ function App() {
   const updateSetting = (key, val) => {
     if (key === 'cols') setCols(val);
     else if (key === 'rows') setRows(val);
-    else if (key === 'sizeMode') setSizeMode(val);
     else if (key === 'maxRecMs') setMaxRecMs(val);
     else if (key === 'globalVolume') setGlobalVolume(val);
     else if (key === 'cameraFacing') setCameraFacing(val);
@@ -406,7 +393,7 @@ function App() {
     setSaving(true);
     try {
       const padMeta = pads.map(p => p ? { thumb: p.thumb, label: p.label, volume: p.volume } : null);
-      await dbPut('metadata', { cols, rows, sizeMode, maxRecMs, globalVolume, cameraFacing, padMeta });
+      await dbPut('metadata', { cols, rows, maxRecMs, globalVolume, cameraFacing, padMeta });
       for (let i = 0; i < pads.length; i++) {
         if (pads[i]?.url) {
           const blob = await fetch(pads[i].url).then(r => r.blob());
@@ -694,7 +681,7 @@ function App() {
       <SettingsPanel
         open={showSettings}
         onClose={() => setShowSettings(false)}
-        settings={{ sizeMode, cols, rows, maxRecMs, globalVolume, cameraFacing }}
+        settings={{ cols, rows, maxRecMs, globalVolume, cameraFacing }}
         update={updateSetting}
         onReset={handleReset}
       />
