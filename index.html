@@ -510,11 +510,20 @@ function App() {
 
   // ── Delete ────────────────────────────────────────────────────
   const deletePad = (e, idx) => {
-    e.stopPropagation(); stopPad(idx);
-    if (padsRef.current[idx]?.url) URL.revokeObjectURL(padsRef.current[idx].url);
-    const np = [...padsRef.current]; np[idx] = null;
-    padsRef.current = np; setPads([...np]);
-    autoSave(np);
+    e.stopPropagation();
+    const label = padsRef.current[idx]?.label;
+    const name = label ? `'${label}'` : '이 패드';
+    setConfirm({
+      msg: `${name}의 녹화 내용을 삭제할까요?`,
+      onOk: () => {
+        setConfirm(null);
+        stopPad(idx);
+        if (padsRef.current[idx]?.url) URL.revokeObjectURL(padsRef.current[idx].url);
+        const np = [...padsRef.current]; np[idx] = null;
+        padsRef.current = np; setPads([...np]);
+        autoSave(np);
+      }
+    });
   };
 
   // ── Edit ──────────────────────────────────────────────────────
