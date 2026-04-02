@@ -9,77 +9,454 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
-  body { background: #0A0A0F; font-family: 'Segoe UI', system-ui, sans-serif; user-select: none; }
-  @keyframes blink { from { opacity: 1; } to { opacity: 0.2; } }
+  body { background: #0A0A0F; font-family: 'Segoe UI', system-ui, sans-serif; user-select: none; overflow-x: hidden; }
+  @keyframes blink  { from { opacity:1 } to { opacity:0.2 } }
+  @keyframes slideUp { from { transform:translateY(100%) } to { transform:translateY(0) } }
+  @keyframes fadeIn  { from { opacity:0 } to { opacity:1 } }
+  @keyframes toastIn { from { opacity:0; transform:translateY(20px) } to { opacity:1; transform:translateY(0) } }
+  input[type=range] { -webkit-appearance:none; width:100%; height:4px; border-radius:2px; background:#2a2a3e; outline:none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px; border-radius:50%; background:#4CC9F0; cursor:pointer; }
+  input[type=text] { background:#1a1a2e; border:1px solid #2a2a3e; color:#fff; border-radius:8px; padding:10px 12px; font-size:14px; width:100%; outline:none; }
+  input[type=text]:focus { border-color:#4CC9F0; }
 </style>
 </head>
 <body>
 <div id="root"></div>
-
 <script type="text/babel">
 const { useState, useRef, useCallback, useEffect } = React;
 
-const COLS = 4, ROWS = 3, TOTAL = COLS * ROWS, MAX_REC_MS = 3000;
-
-const PAD_COLORS = [
-  "#FF4D6D","#FF6B35","#FFB703","#06D6A0",
-  "#4CC9F0","#4361EE","#9B5DE5","#F72585",
-  "#E63946","#2EC4B6","#CBFF8C","#FF9F1C",
-];
-const EMOJI_LABELS = ["🐶","🐱","🐸","🎵","🥁","🎹","🎸","🎺","👏","💨","🌊","🔔"];
-
-function getMimeType() {
-  const types = ["video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"];
-  return types.find(t => MediaRecorder.isTypeSupported(t)) || "";
+// ── IndexedDB helpers ──────────────────────────────────────────
+const DB_NAME = 'soundpad_v1';
+function openDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, 1);
+    r.onupgradeneeded = e => e.target.result.createObjectStore('data');
+    r.onsuccess = e => res(e.target.result);
+    r.onerror = e => rej(e.target.error);
+  });
+}
+async function dbPut(key, val) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('data', 'readwrite');
+    tx.objectStore('data').put(val, key);
+    tx.oncomplete = res; tx.onerror = e => rej(e.target.error);
+  });
+}
+async function dbGet(key) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('data', 'readonly');
+    const r = tx.objectStore('data').get(key);
+    r.onsuccess = e => res(e.target.result); r.onerror = e => rej(e.target.error);
+  });
+}
+async function dbDel(key) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('data', 'readwrite');
+    tx.objectStore('data').delete(key);
+    tx.oncomplete = res; tx.onerror = e => rej(e.target.error);
+  });
+}
+async function dbClearAll() {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('data', 'readwrite');
+    tx.objectStore('data').clear();
+    tx.oncomplete = res; tx.onerror = e => rej(e.target.error);
+  });
 }
 
-function PadVideo({ url, onEnd }) {
+// ── Constants ──────────────────────────────────────────────────
+const MIN_GRID = 560, GAP = 10;
+const BASE_COLORS = [
+  '#FF4D6D','#FF6B35','#FFB703','#06D6A0','#4CC9F0','#4361EE','#9B5DE5','#F72585',
+  '#E63946','#2EC4B6','#CBFF8C','#FF9F1C','#A8DADC','#457B9D','#E9C46A','#F4A261',
+  '#C77DFF','#52B788','#FF6B9D','#00B4D8','#FFC8DD','#BDE0FE','#CAFFBF','#FDFFB6',
+];
+const BASE_EMOJIS = [
+  '🐶','🐱','🐸','🎵','🥁','🎹','🎸','🎺','👏','💨','🌊','🔔',
+  '⭐','🎯','🎪','🎨','🦁','🐯','🦊','🐧','🌈','🔥','💧','🌿',
+];
+const padColor = i => BASE_COLORS[i % BASE_COLORS.length];
+const padEmoji = i => BASE_EMOJIS[i % BASE_EMOJIS.length];
+
+function getMimeType() {
+  const types = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+  return types.find(t => MediaRecorder.isTypeSupported(t)) || '';
+}
+
+// ── PadVideo ───────────────────────────────────────────────────
+function PadVideo({ url, volume, onEnd }) {
   const ref = useRef(null);
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
+    v.volume = Math.max(0, Math.min(1, volume));
     v.play().catch(console.error);
     v.onended = onEnd;
   }, []);
   return (
     <video ref={ref} src={url} playsInline style={{
-      position:"absolute", inset:0, width:"100%", height:"100%",
-      objectFit:"cover", borderRadius:14, zIndex:1,
+      position:'absolute', inset:0, width:'100%', height:'100%',
+      objectFit:'cover', borderRadius:14, zIndex:1,
     }} />
   );
 }
 
+// ── Toast ──────────────────────────────────────────────────────
+function Toast({ msg }) {
+  return (
+    <div style={{
+      position:'fixed', bottom:32, left:'50%', transform:'translateX(-50%)',
+      background:'#06D6A0', color:'#000', padding:'10px 24px',
+      borderRadius:50, fontWeight:700, fontSize:13, zIndex:500,
+      animation:'toastIn 0.3s ease-out',
+      boxShadow:'0 4px 20px rgba(6,214,160,0.4)',
+    }}>{msg}</div>
+  );
+}
+
+// ── Label/Volume Edit Modal ────────────────────────────────────
+function PadEditModal({ pad, idx, onSave, onClose }) {
+  const [label, setLabel] = useState(pad?.label || '');
+  const [vol, setVol] = useState(pad?.volume !== undefined ? pad.volume : 1);
+  return (
+    <>
+      <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:400 }} />
+      <div style={{
+        position:'fixed', top:'50%', left:'50%', transform:'translate(-50%,-50%)',
+        background:'#111128', borderRadius:20, padding:28, width:300, zIndex:401,
+        animation:'fadeIn 0.2s ease-out',
+      }}>
+        <div style={{ color:'#fff', fontWeight:800, fontSize:15, marginBottom:20 }}>
+          ✏️ 패드 편집
+        </div>
+        <div style={{ marginBottom:20 }}>
+          <div style={{ color:'#666', fontSize:11, fontWeight:700, letterSpacing:1, marginBottom:8 }}>패드 이름</div>
+          <input
+            type="text"
+            value={label}
+            onChange={e => setLabel(e.target.value)}
+            placeholder="이름 입력..."
+            maxLength={12}
+            autoFocus
+          />
+        </div>
+        <div style={{ marginBottom:28 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
+            <span style={{ color:'#666', fontSize:11, fontWeight:700, letterSpacing:1 }}>패드 볼륨</span>
+            <span style={{ color:'#4CC9F0', fontSize:12, fontWeight:700 }}>{Math.round(vol * 100)}%</span>
+          </div>
+          <input type="range" min={0} max={1} step={0.05} value={vol} onChange={e => setVol(+e.target.value)} />
+        </div>
+        <div style={{ display:'flex', gap:10 }}>
+          <button onClick={onClose} style={{
+            flex:1, padding:'10px 0', borderRadius:10, border:'1px solid #2a2a3e',
+            background:'#1a1a2e', color:'#aaa', fontWeight:700, cursor:'pointer', fontSize:13,
+          }}>취소</button>
+          <button onClick={() => onSave(label.trim(), vol)} style={{
+            flex:1, padding:'10px 0', borderRadius:10, border:'none',
+            background:'linear-gradient(135deg,#4CC9F0,#4361EE)', color:'#fff',
+            fontWeight:700, cursor:'pointer', fontSize:13,
+          }}>저장</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Settings Panel ─────────────────────────────────────────────
+function SettingsPanel({ open, onClose, settings, update, onReset }) {
+  if (!open) return null;
+  const { sizeMode, cols, rows, maxRecMs, globalVolume, cameraFacing } = settings;
+
+  const sBtn = active => ({
+    flex:1, padding:'8px 0', borderRadius:8, border:'none', cursor:'pointer',
+    fontWeight:700, fontSize:12,
+    background: active ? '#4CC9F0' : '#1A1A2E',
+    color: active ? '#000' : '#555',
+  });
+  const stepBtn = disabled => ({
+    width:36, height:36, borderRadius:8, border:'1px solid #2a2a3e',
+    background:'#1A1A2E', color: disabled ? '#333' : '#fff',
+    fontSize:20, cursor: disabled ? 'default' : 'pointer',
+    display:'flex', alignItems:'center', justifyContent:'center',
+  });
+  const section = { color:'#666', fontSize:11, fontWeight:700, letterSpacing:1, marginBottom:10 };
+  const rowS = { display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:24 };
+  const val = { color:'#fff', fontWeight:800, fontSize:18, minWidth:36, textAlign:'center' };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:200 }} />
+      <div style={{
+        position:'fixed', bottom:0, left:0, right:0,
+        background:'#111128', borderRadius:'20px 20px 0 0',
+        padding:'24px 24px 44px', zIndex:201,
+        animation:'slideUp 0.25s ease-out',
+        maxHeight:'90vh', overflowY:'auto',
+      }}>
+        <div style={{ width:40, height:4, background:'#333', borderRadius:2, margin:'0 auto 24px' }} />
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:28 }}>
+          <span style={{ color:'#fff', fontWeight:800, fontSize:16 }}>⚙️ 환경설정</span>
+          <button onClick={onClose} style={{ background:'none', border:'none', color:'#555', fontSize:20, cursor:'pointer' }}>✕</button>
+        </div>
+
+        {/* 화면 크기 */}
+        <div style={{ marginBottom:24 }}>
+          <div style={section}>화면 크기</div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button style={sBtn(sizeMode==='fixed')} onClick={() => update('sizeMode','fixed')}>고정 (현재 크기)</button>
+            <button style={sBtn(sizeMode==='proportional')} onClick={() => update('sizeMode','proportional')}>창 크기에 맞춤</button>
+          </div>
+        </div>
+
+        {/* 버튼 배치 */}
+        <div style={{ marginBottom:24 }}>
+          <div style={section}>버튼 배치</div>
+          <div style={rowS}>
+            <span style={{ color:'#aaa', fontSize:13 }}>가로 열 수</span>
+            <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+              <button style={stepBtn(cols<=1)} onClick={() => cols > 1 && update('cols', cols-1)}>−</button>
+              <span style={val}>{cols}</span>
+              <button style={stepBtn(cols>=8)} onClick={() => cols < 8 && update('cols', cols+1)}>+</button>
+            </div>
+          </div>
+          <div style={{ ...rowS, marginBottom:0 }}>
+            <span style={{ color:'#aaa', fontSize:13 }}>세로 행 수</span>
+            <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+              <button style={stepBtn(rows<=1)} onClick={() => rows > 1 && update('rows', rows-1)}>−</button>
+              <span style={val}>{rows}</span>
+              <button style={stepBtn(rows>=6)} onClick={() => rows < 6 && update('rows', rows+1)}>+</button>
+            </div>
+          </div>
+          <div style={{ color:'#444', fontSize:11, textAlign:'right', marginTop:8 }}>총 {cols*rows}개 패드</div>
+        </div>
+
+        {/* 녹음 시간 */}
+        <div style={{ marginBottom:24 }}>
+          <div style={section}>최대 녹음 시간</div>
+          <div style={{ display:'flex', gap:8 }}>
+            {[1000, 3000, 5000].map(ms => (
+              <button key={ms} style={sBtn(maxRecMs===ms)} onClick={() => update('maxRecMs', ms)}>
+                {ms/1000}초
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 전체 볼륨 */}
+        <div style={{ marginBottom:24 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:10 }}>
+            <span style={section}>전체 볼륨</span>
+            <span style={{ color:'#4CC9F0', fontSize:12, fontWeight:700 }}>{Math.round(globalVolume*100)}%</span>
+          </div>
+          <input type="range" min={0} max={1} step={0.05}
+            value={globalVolume}
+            onChange={e => update('globalVolume', +e.target.value)}
+          />
+        </div>
+
+        {/* 카메라 방향 */}
+        <div style={{ marginBottom:32 }}>
+          <div style={section}>카메라</div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button style={sBtn(cameraFacing==='user')} onClick={() => update('cameraFacing','user')}>📱 전면 카메라</button>
+            <button style={sBtn(cameraFacing==='environment')} onClick={() => update('cameraFacing','environment')}>📷 후면 카메라</button>
+          </div>
+        </div>
+
+        {/* 전체 초기화 */}
+        <button
+          onClick={onReset}
+          style={{
+            width:'100%', padding:'14px 0', borderRadius:12, border:'none',
+            background:'#2a0a0a', color:'#FF4D6D', fontWeight:700, fontSize:14,
+            cursor:'pointer', letterSpacing:0.5,
+          }}
+        >🗑 전체 초기화</button>
+      </div>
+    </>
+  );
+}
+
+// ── App ────────────────────────────────────────────────────────
 function App() {
-  const [pads, setPads] = useState(Array(TOTAL).fill(null));
-  const [mode, setMode] = useState("play");
+  // Grid & settings
+  const [cols, setCols] = useState(4);
+  const [rows, setRows] = useState(3);
+  const [sizeMode, setSizeMode] = useState('fixed');
+  const [maxRecMs, setMaxRecMs] = useState(3000);
+  const [globalVolume, setGlobalVolume] = useState(1);
+  const [cameraFacing, setCameraFacing] = useState('user');
+  const [gridWidth, setGridWidth] = useState(MIN_GRID);
+
+  // Pads: { url, thumb, label, volume }
+  const [pads, setPads] = useState(() => Array(4*3).fill(null));
+
+  // UI state
+  const [mode, setMode] = useState('play');
   const [recordingIdx, setRecordingIdx] = useState(null);
   const [playKeys, setPlayKeys] = useState({});
   const [cameraReady, setCameraReady] = useState(false);
   const [recProgress, setRecProgress] = useState(0);
+  const [showSettings, setShowSettings] = useState(false);
+  const [editPad, setEditPad] = useState(null); // {idx}
+  const [toast, setToast] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
 
+  // Refs
   const mrRef = useRef(null);
   const chunksRef = useRef([]);
   const streamRef = useRef(null);
   const cameraVideoRef = useRef(null);
   const timerRef = useRef(null);
   const progressRef = useRef(null);
+  const pendingThumbRef = useRef(null);
+  const toastTimerRef = useRef(null);
 
-  useEffect(() => () => {
-    clearTimeout(timerRef.current);
-    clearInterval(progressRef.current);
-    streamRef.current?.getTracks().forEach(t => t.stop());
+  // ── Load from DB on mount ──
+  useEffect(() => {
+    (async () => {
+      try {
+        const meta = await dbGet('metadata');
+        if (!meta) { setLoading(false); return; }
+
+        const { cols: c, rows: r, sizeMode: sm, maxRecMs: mr, globalVolume: gv,
+                cameraFacing: cf, padMeta } = meta;
+
+        if (c) setCols(c);
+        if (r) setRows(r);
+        if (sm) setSizeMode(sm);
+        if (mr) setMaxRecMs(mr);
+        if (gv !== undefined) setGlobalVolume(gv);
+        if (cf) setCameraFacing(cf);
+
+        const total = (c||4) * (r||3);
+        const newPads = Array(total).fill(null);
+        for (let i = 0; i < total; i++) {
+          if (padMeta && padMeta[i]) {
+            const blob = await dbGet(`blob_${i}`);
+            if (blob) {
+              newPads[i] = { url: URL.createObjectURL(blob), ...padMeta[i] };
+            }
+          }
+        }
+        setPads(newPads);
+      } catch(e) { console.error('Load error:', e); }
+      setLoading(false);
+    })();
+
+    return () => {
+      clearTimeout(timerRef.current);
+      clearInterval(progressRef.current);
+      streamRef.current?.getTracks().forEach(t => t.stop());
+    };
   }, []);
 
+  // ── Grid size ──
+  useEffect(() => {
+    const HEADER = 80, HINT = 60;
+    const compute = () => {
+      if (sizeMode === 'fixed') { setGridWidth(MIN_GRID); return; }
+      const availW = window.innerWidth - 24;
+      const availH = window.innerHeight - HEADER - HINT;
+      const cellByH = (availH - GAP*(rows-1)) / rows;
+      const wByH = cellByH * cols + GAP*(cols-1);
+      setGridWidth(Math.max(MIN_GRID, Math.min(availW, wByH)));
+    };
+    compute();
+    window.addEventListener('resize', compute);
+    return () => window.removeEventListener('resize', compute);
+  }, [sizeMode, cols, rows]);
+
+  // ── Resize pads array when grid changes ──
+  useEffect(() => {
+    const total = cols * rows;
+    setPads(prev => {
+      const next = Array(total).fill(null);
+      for (let i = 0; i < Math.min(prev.length, total); i++) next[i] = prev[i];
+      return next;
+    });
+  }, [cols, rows]);
+
+  // ── Settings updater ──
+  const updateSetting = (key, val) => {
+    if (key === 'cols') setCols(val);
+    else if (key === 'rows') setRows(val);
+    else if (key === 'sizeMode') setSizeMode(val);
+    else if (key === 'maxRecMs') setMaxRecMs(val);
+    else if (key === 'globalVolume') setGlobalVolume(val);
+    else if (key === 'cameraFacing') setCameraFacing(val);
+  };
+
+  // ── Toast helper ──
+  const showToast = (msg) => {
+    setToast(msg);
+    clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 2000);
+  };
+
+  // ── Save ──
+  const handleSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const padMeta = pads.map(p => p ? { thumb: p.thumb, label: p.label, volume: p.volume } : null);
+      await dbPut('metadata', { cols, rows, sizeMode, maxRecMs, globalVolume, cameraFacing, padMeta });
+      for (let i = 0; i < pads.length; i++) {
+        if (pads[i]?.url) {
+          const blob = await fetch(pads[i].url).then(r => r.blob());
+          await dbPut(`blob_${i}`, blob);
+        } else {
+          await dbDel(`blob_${i}`);
+        }
+      }
+      showToast('💾 저장됐습니다');
+    } catch(e) {
+      console.error(e);
+      showToast('저장 실패');
+    }
+    setSaving(false);
+  };
+
+  // ── Reset ──
+  const handleReset = async () => {
+    if (!window.confirm('모든 패드를 초기화할까요?')) return;
+    await dbClearAll();
+    setPads(Array(cols * rows).fill(null));
+    setPlayKeys({});
+    setShowSettings(false);
+    showToast('초기화됐습니다');
+  };
+
+  // ── Record ──
   const stopRecord = useCallback(() => {
+    const lv = cameraVideoRef.current;
+    if (lv && lv.readyState >= 2 && lv.videoWidth > 0) {
+      try {
+        const c = document.createElement('canvas');
+        c.width = lv.videoWidth; c.height = lv.videoHeight;
+        c.getContext('2d').drawImage(lv, 0, 0);
+        pendingThumbRef.current = c.toDataURL('image/jpeg', 0.8);
+      } catch { pendingThumbRef.current = null; }
+    } else {
+      pendingThumbRef.current = null;
+    }
     clearTimeout(timerRef.current);
     clearInterval(progressRef.current);
-    if (mrRef.current?.state !== "inactive") mrRef.current.stop();
+    if (mrRef.current?.state !== 'inactive') mrRef.current.stop();
   }, []);
 
   const startRecord = useCallback(async (idx) => {
     if (recordingIdx !== null) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: cameraFacing }, audio: true,
+      });
       streamRef.current = stream;
       chunksRef.current = [];
 
@@ -93,20 +470,16 @@ function App() {
       mrRef.current = mr;
       mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mr.onstop = () => {
-        // 트랙 멈추기 전에 라이브 카메라에서 썸네일 캡처
-        let thumb = null;
-        const lv = cameraVideoRef.current;
-        if (lv && lv.readyState >= 2 && lv.videoWidth > 0) {
-          try {
-            const c = document.createElement("canvas");
-            c.width = lv.videoWidth; c.height = lv.videoHeight;
-            c.getContext("2d").drawImage(lv, 0, 0);
-            thumb = c.toDataURL("image/jpeg", 0.8);
-          } catch(e) { thumb = null; }
-        }
-        const blob = new Blob(chunksRef.current, { type: "video/webm" });
+        const thumb = pendingThumbRef.current;
+        pendingThumbRef.current = null;
+        const blob = new Blob(chunksRef.current, { type: 'video/webm' });
         const url = URL.createObjectURL(blob);
-        setPads(p => { const n = [...p]; n[idx] = { url, thumb }; return n; });
+        setPads(p => {
+          const n = [...p];
+          const existing = n[idx];
+          n[idx] = { url, thumb, label: existing?.label || '', volume: existing?.volume !== undefined ? existing.volume : 1 };
+          return n;
+        });
         stream.getTracks().forEach(t => t.stop());
         streamRef.current = null;
         setCameraReady(false);
@@ -122,17 +495,18 @@ function App() {
       let elapsed = 0;
       progressRef.current = setInterval(() => {
         elapsed += 100;
-        setRecProgress(elapsed / MAX_REC_MS);
-        if (elapsed >= MAX_REC_MS) clearInterval(progressRef.current);
+        setRecProgress(elapsed / maxRecMs);
+        if (elapsed >= maxRecMs) clearInterval(progressRef.current);
       }, 100);
-      timerRef.current = setTimeout(() => stopRecord(), MAX_REC_MS);
-    } catch (err) {
-      console.error(err);
+      timerRef.current = setTimeout(() => stopRecord(), maxRecMs);
+    } catch(e) {
+      console.error(e);
       setRecordingIdx(null);
       setCameraReady(false);
     }
-  }, [recordingIdx]);
+  }, [recordingIdx, cameraFacing, maxRecMs]);
 
+  // ── Play ──
   const playPad = useCallback((idx) => {
     if (!pads[idx]) return;
     setPlayKeys(k => ({ ...k, [idx]: (k[idx] || 0) + 1 }));
@@ -148,196 +522,191 @@ function App() {
     setPads(p => { const n = [...p]; n[idx] = null; return n; });
   };
 
+  const openEdit = (e, idx) => {
+    e.stopPropagation();
+    setEditPad({ idx });
+  };
+
+  const saveEdit = (label, volume) => {
+    const { idx } = editPad;
+    setPads(p => { const n = [...p]; if (n[idx]) n[idx] = { ...n[idx], label, volume }; return n; });
+    setEditPad(null);
+  };
+
   const handlePad = (idx) => {
-    if (mode === "record") startRecord(idx);
+    if (mode === 'record') startRecord(idx);
     else playPad(idx);
   };
 
+  const total = cols * rows;
+
+  if (loading) {
+    return (
+      <div style={{ minHeight:'100dvh', display:'flex', alignItems:'center', justifyContent:'center', color:'#555', fontSize:14 }}>
+        불러오는 중...
+      </div>
+    );
+  }
+
   return (
-    <div style={{
-      minHeight:"100dvh", display:"flex", flexDirection:"column",
-      alignItems:"center", padding:"0 12px 24px",
-    }}>
+    <div style={{ minHeight:'100dvh', display:'flex', flexDirection:'column', alignItems:'center', padding:'0 12px 24px' }}>
+
       {/* Header */}
-      <div style={{
-        width:"100%", maxWidth:560,
-        display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"20px 0 16px",
-      }}>
+      <div style={{ width:'100%', maxWidth:gridWidth, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 0 14px', gap:8 }}>
         <div>
-          <div style={{ color:"#fff", fontSize:20, fontWeight:800, letterSpacing:-0.5 }}>
-            🎛 사운드 패드
-          </div>
-          <div style={{ color:"#555", fontSize:11, marginTop:2 }}>
-            {mode === "record" ? "패드를 눌러 녹음하세요" : "패드를 눌러 재생하세요"}
+          <div style={{ color:'#fff', fontSize:18, fontWeight:800, letterSpacing:-0.5 }}>🎛 사운드 패드</div>
+          <div style={{ color:'#555', fontSize:10, marginTop:2 }}>
+            {mode === 'record' ? '패드를 눌러 녹음' : '패드를 눌러 재생'}
           </div>
         </div>
-        <button
-          onClick={() => setMode(m => m === "play" ? "record" : "play")}
-          style={{
-            padding:"10px 18px", borderRadius:50, border:"none",
-            background: mode === "record"
-              ? "linear-gradient(135deg,#FF4D6D,#FF6B35)"
-              : "linear-gradient(135deg,#06D6A0,#4CC9F0)",
-            color:"#fff", fontWeight:700, fontSize:13, cursor:"pointer",
-            boxShadow: mode === "record"
-              ? "0 0 20px rgba(255,77,109,0.5)"
-              : "0 0 20px rgba(6,214,160,0.4)",
-            transition:"all 0.3s",
-          }}
-        >
-          {mode === "record" ? "🔴 녹음 모드" : "▶ 재생 모드"}
-        </button>
+        <div style={{ display:'flex', gap:7, alignItems:'center' }}>
+          <button onClick={handleSave} disabled={saving} style={{
+            height:38, padding:'0 14px', borderRadius:10, border:'1px solid #2a2a3e',
+            background:'#1A1A2E', color: saving ? '#444' : '#06D6A0',
+            fontWeight:700, fontSize:12, cursor: saving ? 'default' : 'pointer',
+          }}>{saving ? '저장 중...' : '💾 저장'}</button>
+          <button onClick={() => setShowSettings(true)} style={{
+            width:38, height:38, borderRadius:10, border:'1px solid #2a2a3e',
+            background:'#1A1A2E', color:'#aaa', fontSize:16,
+            cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
+          }}>⚙️</button>
+          <button onClick={() => setMode(m => m === 'play' ? 'record' : 'play')} style={{
+            height:38, padding:'0 14px', borderRadius:50, border:'none',
+            background: mode === 'record'
+              ? 'linear-gradient(135deg,#FF4D6D,#FF6B35)'
+              : 'linear-gradient(135deg,#06D6A0,#4CC9F0)',
+            color:'#fff', fontWeight:700, fontSize:12, cursor:'pointer',
+            boxShadow: mode === 'record' ? '0 0 16px rgba(255,77,109,0.5)' : '0 0 16px rgba(6,214,160,0.4)',
+          }}>{mode === 'record' ? '🔴 녹음' : '▶ 재생'}</button>
+        </div>
       </div>
 
       {/* Grid */}
-      <div style={{
-        display:"grid",
-        gridTemplateColumns:`repeat(${COLS}, 1fr)`,
-        gap:10, width:"100%", maxWidth:560,
-      }}>
-        {Array.from({ length: TOTAL }, (_, i) => {
+      <div style={{ display:'grid', gridTemplateColumns:`repeat(${cols}, 1fr)`, gap:GAP, width:gridWidth, transition:'width 0.3s ease' }}>
+        {Array.from({ length: total }, (_, i) => {
           const pad = pads[i];
           const isRec = recordingIdx === i;
           const playKey = playKeys[i];
           const isPlay = !!playKey;
-          const color = PAD_COLORS[i];
+          const color = padColor(i);
+          const padVol = (pad?.volume !== undefined ? pad.volume : 1) * globalVolume;
 
           return (
-            <div
-              key={i}
-              onPointerDown={() => handlePad(i)}
-              style={{
-                aspectRatio:"1", borderRadius:16,
-                background: pad?.thumb && !isPlay
-                  ? `url(${pad.thumb}) center/cover`
-                  : `${color}22`,
-                border: isRec ? `2.5px solid #FF4D6D`
-                  : isPlay ? `2.5px solid ${color}`
-                  : `2px solid ${color}44`,
-                display:"flex", alignItems:"center", justifyContent:"center",
-                cursor:"pointer", position:"relative", overflow:"hidden",
-                transition:"transform 0.08s, box-shadow 0.08s",
-                transform: isPlay ? "scale(0.93)" : "scale(1)",
-                boxShadow: isPlay ? `0 0 28px ${color}aa`
-                  : isRec ? "0 0 24px rgba(255,77,109,0.6)"
-                  : "none",
-                touchAction:"none",
-              }}
-            >
-              {pad && isPlay && (
-                <PadVideo key={playKey} url={pad.url} onEnd={() => stopPad(i)} />
-              )}
+            <div key={i} onPointerDown={() => handlePad(i)} style={{
+              aspectRatio:'1', borderRadius:16,
+              background: pad?.thumb && !isPlay ? `url(${pad.thumb}) center/cover` : `${color}22`,
+              border: isRec ? `2.5px solid #FF4D6D` : isPlay ? `2.5px solid ${color}` : `2px solid ${color}44`,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              cursor:'pointer', position:'relative', overflow:'hidden',
+              transition:'transform 0.08s, box-shadow 0.08s',
+              transform: isPlay ? 'scale(0.93)' : 'scale(1)',
+              boxShadow: isPlay ? `0 0 28px ${color}aa` : isRec ? '0 0 24px rgba(255,77,109,0.6)' : 'none',
+              touchAction:'none',
+            }}>
+              {pad && isPlay && <PadVideo key={playKey} url={pad.url} volume={padVol} onEnd={() => stopPad(i)} />}
 
-              {isPlay && (
-                <div style={{
-                  position:"absolute", inset:0, zIndex:2, pointerEvents:"none",
-                  background:`linear-gradient(to top, ${color}55 0%, transparent 60%)`,
-                  borderRadius:14,
-                }} />
-              )}
+              {isPlay && <div style={{ position:'absolute', inset:0, zIndex:2, pointerEvents:'none', background:`linear-gradient(to top, ${color}55 0%, transparent 60%)`, borderRadius:14 }} />}
 
               {!pad && (
-                <div style={{ textAlign:"center", position:"relative", zIndex:2 }}>
-                  <div style={{ fontSize:28 }}>{EMOJI_LABELS[i]}</div>
-                  {mode === "record" && (
-                    <div style={{ color, fontSize:10, fontWeight:700, marginTop:4 }}>
-                      탭하여 녹음
-                    </div>
-                  )}
+                <div style={{ textAlign:'center', position:'relative', zIndex:2 }}>
+                  <div style={{ fontSize: cols >= 6 ? 18 : 26 }}>{padEmoji(i)}</div>
+                  {mode === 'record' && <div style={{ color, fontSize:9, fontWeight:700, marginTop:3 }}>탭하여 녹음</div>}
                 </div>
               )}
 
-              {pad && !isPlay && !isRec && (
-                <div style={{
-                  position:"absolute", inset:0, zIndex:2,
-                  background:"linear-gradient(to top, rgba(0,0,0,0.5) 0%, transparent 60%)",
-                  borderRadius:14,
-                }} />
-              )}
+              {pad && !isPlay && !isRec && <div style={{ position:'absolute', inset:0, zIndex:2, background:'linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 55%)', borderRadius:14 }} />}
 
+              {/* REC badge */}
               {isRec && (
-                <div style={{
-                  position:"absolute", top:8, left:8, zIndex:5,
-                  display:"flex", alignItems:"center", gap:4,
-                  background:"rgba(0,0,0,0.75)", borderRadius:20, padding:"3px 8px",
-                }}>
-                  <div style={{
-                    width:7, height:7, borderRadius:"50%", background:"#FF4D6D",
-                    animation:"blink 0.5s alternate infinite",
-                  }} />
-                  <span style={{ color:"#FF4D6D", fontSize:10, fontWeight:700 }}>REC</span>
+                <div style={{ position:'absolute', top:6, left:6, zIndex:5, display:'flex', alignItems:'center', gap:3, background:'rgba(0,0,0,0.8)', borderRadius:20, padding:'2px 7px' }}>
+                  <div style={{ width:6, height:6, borderRadius:'50%', background:'#FF4D6D', animation:'blink 0.5s alternate infinite' }} />
+                  <span style={{ color:'#FF4D6D', fontSize:9, fontWeight:700 }}>REC</span>
                 </div>
               )}
 
-              {pad && mode === "record" && !isRec && (
-                <button
-                  onPointerDown={e => deletePad(e, i)}
-                  style={{
-                    position:"absolute", top:6, right:6, zIndex:10,
-                    width:22, height:22, borderRadius:"50%",
-                    background:"rgba(0,0,0,0.75)", border:"none",
-                    color:"#fff", fontSize:12, cursor:"pointer",
-                    display:"flex", alignItems:"center", justifyContent:"center",
-                  }}
-                >✕</button>
+              {/* Record mode controls */}
+              {pad && mode === 'record' && !isRec && (
+                <>
+                  <button onPointerDown={e => deletePad(e, i)} style={{
+                    position:'absolute', top:5, right:5, zIndex:10, width:20, height:20, borderRadius:'50%',
+                    background:'rgba(0,0,0,0.8)', border:'none', color:'#fff', fontSize:11, cursor:'pointer',
+                    display:'flex', alignItems:'center', justifyContent:'center',
+                  }}>✕</button>
+                  <button onPointerDown={e => openEdit(e, i)} style={{
+                    position:'absolute', top:5, left:5, zIndex:10, width:20, height:20, borderRadius:'50%',
+                    background:'rgba(0,0,0,0.8)', border:'none', color:'#4CC9F0', fontSize:11, cursor:'pointer',
+                    display:'flex', alignItems:'center', justifyContent:'center',
+                  }}>✏️</button>
+                </>
+              )}
+
+              {/* Label */}
+              {pad?.label && !isRec && (
+                <div style={{
+                  position:'absolute', bottom:0, left:0, right:0, zIndex:3,
+                  padding:'4px 6px', textAlign:'center',
+                  color:'#fff', fontSize: cols >= 6 ? 9 : 11, fontWeight:700,
+                  textShadow:'0 1px 4px rgba(0,0,0,0.8)',
+                  whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+                }}>{pad.label}</div>
               )}
             </div>
           );
         })}
       </div>
 
-      <div style={{ marginTop:20, color:"#444", fontSize:12, textAlign:"center", lineHeight:1.8 }}>
-        {mode === "record"
-          ? "패드를 눌러 녹음 → 자동 3초 후 저장 | ✕ 버튼으로 삭제"
-          : "여러 패드를 빠르게 눌러 비트를 만들어 보세요!"}
+      <div style={{ marginTop:14, color:'#444', fontSize:11, textAlign:'center', lineHeight:1.8, width:gridWidth }}>
+        {mode === 'record' ? '탭: 녹음 | ✏️: 이름·볼륨 편집 | ✕: 삭제' : '패드를 빠르게 눌러 비트를 만들어 보세요!'}
       </div>
 
       {/* Camera Modal */}
       {cameraReady && (
-        <div style={{
-          position:"fixed", inset:0, background:"rgba(0,0,0,0.92)",
-          display:"flex", flexDirection:"column",
-          alignItems:"center", justifyContent:"center",
-          zIndex:100, gap:16,
-        }}>
-          <div style={{ color:"#FF4D6D", fontWeight:800, fontSize:16, letterSpacing:2 }}>
-            🔴 녹음 중
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.92)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', zIndex:300, gap:16 }}>
+          <div style={{ color:'#FF4D6D', fontWeight:800, fontSize:15, letterSpacing:2 }}>🔴 녹음 중</div>
+          <video ref={cameraVideoRef} muted autoPlay playsInline style={{
+            width:280, height:210, borderRadius:16, border:'2px solid #FF4D6D', background:'#000',
+            objectFit:'cover', boxShadow:'0 0 40px rgba(255,77,109,0.4)',
+            transform: cameraFacing === 'user' ? 'scaleX(-1)' : 'none',
+          }} />
+          <div style={{ width:280, height:5, background:'#222', borderRadius:3, overflow:'hidden' }}>
+            <div style={{ height:'100%', width:`${recProgress*100}%`, background:'linear-gradient(90deg,#FF4D6D,#FF6B35)', borderRadius:3, transition:'width 0.1s linear' }} />
           </div>
-          <video
-            ref={cameraVideoRef}
-            muted autoPlay playsInline
-            style={{
-              width:280, height:210, borderRadius:16,
-              border:"2px solid #FF4D6D", background:"#000",
-              objectFit:"cover", boxShadow:"0 0 40px rgba(255,77,109,0.4)",
-              transform:"scaleX(-1)",
-            }}
-          />
-          <div style={{ width:280, height:6, background:"#222", borderRadius:3, overflow:"hidden" }}>
-            <div style={{
-              height:"100%", width:`${recProgress * 100}%`,
-              background:"linear-gradient(90deg,#FF4D6D,#FF6B35)",
-              borderRadius:3, transition:"width 0.1s linear",
-            }} />
-          </div>
-          <button
-            onClick={stopRecord}
-            style={{
-              padding:"12px 32px", borderRadius:50, border:"none",
-              background:"linear-gradient(135deg,#FF4D6D,#FF6B35)",
-              color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer",
-              boxShadow:"0 0 24px rgba(255,77,109,0.5)",
-            }}
-          >⏹ 녹음 완료</button>
-          <div style={{ color:"#555", fontSize:12 }}>최대 3초 · 자동으로 저장됩니다</div>
+          <div style={{ color:'#555', fontSize:11 }}>{maxRecMs/1000}초 최대 · 자동으로 저장됩니다</div>
+          <button onClick={stopRecord} style={{
+            padding:'12px 32px', borderRadius:50, border:'none',
+            background:'linear-gradient(135deg,#FF4D6D,#FF6B35)',
+            color:'#fff', fontWeight:800, fontSize:14, cursor:'pointer',
+            boxShadow:'0 0 24px rgba(255,77,109,0.5)',
+          }}>⏹ 녹음 완료</button>
         </div>
       )}
+
+      {/* Settings */}
+      <SettingsPanel
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        settings={{ sizeMode, cols, rows, maxRecMs, globalVolume, cameraFacing }}
+        update={updateSetting}
+        onReset={handleReset}
+      />
+
+      {/* Pad edit modal */}
+      {editPad && (
+        <PadEditModal
+          pad={pads[editPad.idx]}
+          idx={editPad.idx}
+          onSave={saveEdit}
+          onClose={() => setEditPad(null)}
+        />
+      )}
+
+      {/* Toast */}
+      {toast && <Toast msg={toast} />}
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>
 </body>
 </html>
