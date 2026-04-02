@@ -3,22 +3,24 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>사운드 패드 Beta</title>
+<title>클래스 패드 Beta</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <style>
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; margin:0; padding:0; }
   body { background:#0A0A0F; font-family:'Segoe UI',system-ui,sans-serif; user-select:none; overflow:hidden; height:100dvh; }
-  @keyframes blink     { from{opacity:1} to{opacity:0.2} }
-  @keyframes slideUp   { from{transform:translateY(100%)} to{transform:translateY(0)} }
-  @keyframes fadeIn    { from{opacity:0} to{opacity:1} }
-  @keyframes toastIn   { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
-  @keyframes countPop  { 0%{opacity:0;transform:translate(-50%,-50%) scale(2)} 40%{opacity:1} 100%{opacity:1;transform:translate(-50%,-50%) scale(1)} }
-  input[type=range] { -webkit-appearance:none; width:100%; height:4px; border-radius:2px; background:#2a2a3e; outline:none; }
-  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px; border-radius:50%; background:#4CC9F0; cursor:pointer; }
-  input[type=text] { background:#1a1a2e; border:1px solid #2a2a3e; color:#fff; border-radius:8px; padding:10px 12px; font-size:14px; width:100%; outline:none; }
-  input[type=text]:focus { border-color:#4CC9F0; }
+  @keyframes blink    { from{opacity:1} to{opacity:0.2} }
+  @keyframes slideUp  { from{transform:translateY(100%)} to{transform:translateY(0)} }
+  @keyframes fadeIn   { from{opacity:0} to{opacity:1} }
+  @keyframes toastIn  { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes countPop { 0%{opacity:0;transform:translate(-50%,-50%) scale(2)} 40%{opacity:1} 100%{opacity:1;transform:translate(-50%,-50%) scale(1)} }
+  @keyframes pulse    { 0%,100%{transform:scale(1);opacity:0.9} 50%{transform:scale(1.18);opacity:1} }
+  @keyframes wave     { 0%,100%{height:8px} 50%{height:32px} }
+  input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:2px;background:#2a2a3e;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:#4CC9F0;cursor:pointer}
+  input[type=text]{background:#1a1a2e;border:1px solid #2a2a3e;color:#fff;border-radius:8px;padding:10px 12px;font-size:14px;width:100%;outline:none}
+  input[type=text]:focus{border-color:#4CC9F0}
 </style>
 </head>
 <body>
@@ -26,8 +28,8 @@
 <script type="text/babel">
 const { useState, useRef, useCallback, useEffect } = React;
 
-// ── DB (connection cached) ─────────────────────────────────────
-const DB_NAME = 'soundpad_v1';
+// ── DB ────────────────────────────────────────────────────────
+const DB_NAME = 'classpad_v1';
 let _db = null;
 function openDB() {
   if (_db) return Promise.resolve(_db);
@@ -38,39 +40,48 @@ function openDB() {
     r.onerror = e => rej(e.target.error);
   });
 }
-const dbPut = async (k, v) => { const db = await openDB(); return new Promise((res,rej) => { const tx = db.transaction('data','readwrite'); tx.objectStore('data').put(v,k); tx.oncomplete=res; tx.onerror=e=>rej(e.target.error); }); };
-const dbGet = async (k)    => { const db = await openDB(); return new Promise((res,rej) => { const tx = db.transaction('data','readonly'); const r=tx.objectStore('data').get(k); r.onsuccess=e=>res(e.target.result); r.onerror=e=>rej(e.target.error); }); };
-const dbDel = async (k)    => { const db = await openDB(); return new Promise((res,rej) => { const tx = db.transaction('data','readwrite'); tx.objectStore('data').delete(k); tx.oncomplete=res; tx.onerror=e=>rej(e.target.error); }); };
-const dbClear = async ()   => { const db = await openDB(); return new Promise((res,rej) => { const tx = db.transaction('data','readwrite'); tx.objectStore('data').clear(); tx.oncomplete=res; tx.onerror=e=>rej(e.target.error); }); };
+const dbPut   = async (k,v) => { const db=await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction('data','readwrite'); tx.objectStore('data').put(v,k); tx.oncomplete=res; tx.onerror=e=>rej(e.target.error); }); };
+const dbGet   = async k     => { const db=await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction('data','readonly'); const r=tx.objectStore('data').get(k); r.onsuccess=e=>res(e.target.result); r.onerror=e=>rej(e.target.error); }); };
+const dbDel   = async k     => { const db=await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction('data','readwrite'); tx.objectStore('data').delete(k); tx.oncomplete=res; tx.onerror=e=>rej(e.target.error); }); };
+const dbClear = async ()    => { const db=await openDB(); return new Promise((res,rej)=>{ const tx=db.transaction('data','readwrite'); tx.objectStore('data').clear(); tx.oncomplete=res; tx.onerror=e=>rej(e.target.error); }); };
 
-// ── captureMidFrame — outside component (stable reference) ─────
-function captureMidFrame(url, cb) {
-  const v = document.createElement('video');
-  v.src = url; v.muted = true; v.preload = 'metadata';
-  v.onloadedmetadata = () => { v.currentTime = Math.max(0.1, v.duration / 2); };
-  v.onseeked = () => {
-    try {
-      const c = document.createElement('canvas');
-      c.width = v.videoWidth || 320; c.height = v.videoHeight || 240;
-      c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
-      cb(c.toDataURL('image/jpeg', 0.85));
-    } catch { cb(null); }
-    v.src = '';
-  };
-  v.onerror = () => cb(null);
-}
-
-// ── Constants ──────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────
 const GAP = 10;
 const COLORS = ['#FF4D6D','#FF6B35','#FFB703','#06D6A0','#4CC9F0','#4361EE','#9B5DE5','#F72585','#E63946','#2EC4B6','#CBFF8C','#FF9F1C','#A8DADC','#457B9D','#E9C46A','#F4A261','#C77DFF','#52B788','#FF6B9D','#00B4D8','#FFC8DD','#BDE0FE','#CAFFBF','#FDFFB6'];
 const EMOJIS = ['🐶','🐱','🐸','🎵','🥁','🎹','🎸','🎺','👏','💨','🌊','🔔','⭐','🎯','🎪','🎨','🦁','🐯','🦊','🐧','🌈','🔥','💧','🌿'];
 const pColor = i => COLORS[i % COLORS.length];
 const pEmoji = i => EMOJIS[i % EMOJIS.length];
-function getMime() {
-  return ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(t => MediaRecorder.isTypeSupported(t)) || '';
+
+function getVideoMime() {
+  return ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t)) || '';
+}
+function getAudioMime() {
+  return ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'].find(t=>MediaRecorder.isTypeSupported(t)) || '';
 }
 
-// ── Sub-components ─────────────────────────────────────────────
+// Resize image file to max 480px, return data URL
+function resizeImage(file, cb) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 480;
+      let w = img.width, h = img.height;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else        { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      cb(c.toDataURL('image/jpeg', 0.85));
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Components ────────────────────────────────────────────────
 function PadVideo({ url, volume, onEnd }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -82,59 +93,122 @@ function PadVideo({ url, volume, onEnd }) {
   return <video ref={ref} src={url} playsInline style={{ position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',borderRadius:14,zIndex:1 }} />;
 }
 
-function Toast({ msg }) {
-  return <div style={{ position:'fixed',bottom:32,left:'50%',transform:'translateX(-50%)',background:'#06D6A0',color:'#000',padding:'10px 24px',borderRadius:50,fontWeight:700,fontSize:13,zIndex:500,animation:'toastIn 0.3s ease-out',boxShadow:'0 4px 20px rgba(6,214,160,0.4)',whiteSpace:'nowrap' }}>{msg}</div>;
+function PadAudio({ url, volume, onEnd }) {
+  useEffect(() => {
+    const a = new Audio(url);
+    a.volume = Math.max(0, Math.min(1, volume));
+    a.play().catch(console.error);
+    a.onended = onEnd;
+    return () => { a.pause(); a.src = ''; };
+  }, []);
+  return null;
 }
 
-function Confirm({ msg, onOk, onCancel }) {
+function Toast({ msg }) {
+  return <div style={{ position:'fixed',bottom:32,left:'50%',transform:'translateX(-50%)',background:'#06D6A0',color:'#000',padding:'10px 24px',borderRadius:50,fontWeight:700,fontSize:13,zIndex:700,animation:'toastIn 0.3s ease-out',boxShadow:'0 4px 20px rgba(6,214,160,0.4)',whiteSpace:'nowrap' }}>{msg}</div>;
+}
+
+function Confirm({ msg, onOk, onCancel, okLabel='확인' }) {
   return <>
     <div onClick={onCancel} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:600 }} />
     <div style={{ position:'fixed',top:'50%',left:'50%',transform:'translate(-50%,-50%)',background:'#111128',borderRadius:20,padding:28,width:'min(300px,90vw)',zIndex:601,animation:'fadeIn 0.2s' }}>
       <div style={{ color:'#fff',fontSize:14,fontWeight:600,marginBottom:24,textAlign:'center',lineHeight:1.7,whiteSpace:'pre-line' }}>{msg}</div>
       <div style={{ display:'flex',gap:10 }}>
         <button onClick={onCancel} style={{ flex:1,padding:'11px 0',borderRadius:10,border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontWeight:700,cursor:'pointer',fontSize:13 }}>취소</button>
-        <button onClick={onOk}     style={{ flex:1,padding:'11px 0',borderRadius:10,border:'none',background:'linear-gradient(135deg,#FF4D6D,#FF6B35)',color:'#fff',fontWeight:700,cursor:'pointer',fontSize:13 }}>확인</button>
+        <button onClick={onOk}     style={{ flex:1,padding:'11px 0',borderRadius:10,border:'none',background:'linear-gradient(135deg,#FF4D6D,#FF6B35)',color:'#fff',fontWeight:700,cursor:'pointer',fontSize:13 }}>{okLabel}</button>
       </div>
     </div>
   </>;
 }
 
+// ── Edit Modal (with image picker + type indicator) ───────────
 function EditModal({ pad, onSave, onClose }) {
-  const [label, setLabel] = useState(pad?.label || '');
-  const [vol, setVol]     = useState(pad?.volume ?? 1);
+  const [label,   setLabel]   = useState(pad?.label || '');
+  const [vol,     setVol]     = useState(pad?.volume ?? 1);
+  const [thumb,   setThumb]   = useState(pad?.thumb || null);
+  const fileRef = useRef(null);
+
+  const onFileChange = e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    resizeImage(file, dataUrl => setThumb(dataUrl));
+    e.target.value = '';
+  };
+
+  const typeLabel = pad?.recType === 'audio' ? '🎙 음성 녹음' : '🎬 영상 녹화';
+  const typeColor = pad?.recType === 'audio' ? '#9B5DE5' : '#4CC9F0';
+
   return <>
-    <div onClick={onClose} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:400 }} />
-    <div style={{ position:'fixed',top:'50%',left:'50%',transform:'translate(-50%,-50%)',background:'#111128',borderRadius:20,padding:28,width:'min(300px,90vw)',zIndex:401,animation:'fadeIn 0.2s' }}>
-      <div style={{ color:'#fff',fontWeight:800,fontSize:15,marginBottom:20 }}>✏️ 패드 편집</div>
-      <div style={{ marginBottom:20 }}>
+    <div onClick={onClose} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:500 }} />
+    <div style={{ position:'fixed',top:'50%',left:'50%',transform:'translate(-50%,-50%)',background:'#111128',borderRadius:20,padding:24,width:'min(320px,92vw)',zIndex:501,animation:'fadeIn 0.2s' }}>
+      <div style={{ color:'#fff',fontWeight:800,fontSize:15,marginBottom:16 }}>✏️ 패드 편집</div>
+
+      {/* Thumbnail preview + change */}
+      <div style={{ display:'flex',gap:14,marginBottom:18,alignItems:'center' }}>
+        <div style={{
+          width:72, height:72, borderRadius:12, flexShrink:0,
+          background: thumb ? `url(${thumb}) center/cover` : `${pColor(0)}22`,
+          border: `1.5px solid #2a2a3e`,
+          display:'flex',alignItems:'center',justifyContent:'center',
+          fontSize:28,
+        }}>
+          {!thumb && (pad?.recType==='audio' ? '🎙' : '🎬')}
+        </div>
+        <div style={{ flex:1 }}>
+          <div style={{ color:'#666',fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:8 }}>썸네일 이미지</div>
+          <button
+            onClick={() => fileRef.current?.click()}
+            style={{ display:'block',width:'100%',padding:'8px 0',borderRadius:8,border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontWeight:600,cursor:'pointer',fontSize:12,marginBottom:6 }}
+          >📁 이미지 변경</button>
+          {thumb && (
+            <button
+              onClick={() => setThumb(null)}
+              style={{ display:'block',width:'100%',padding:'6px 0',borderRadius:8,border:'none',background:'transparent',color:'#FF4D6D',fontWeight:600,cursor:'pointer',fontSize:11 }}
+            >원래 썸네일로</button>
+          )}
+          <input ref={fileRef} type="file" accept="image/*" style={{ display:'none' }} onChange={onFileChange} />
+        </div>
+      </div>
+
+      {/* 녹화 방식 표시 */}
+      <div style={{ display:'flex',alignItems:'center',gap:8,marginBottom:16,padding:'8px 12px',background:'#0d0d1a',borderRadius:8,border:'1px solid #1e1e3a' }}>
+        <span style={{ fontSize:11,color:typeColor,fontWeight:700 }}>{typeLabel}</span>
+        <span style={{ fontSize:10,color:'#444',marginLeft:'auto' }}>녹화 방식 (변경불가)</span>
+      </div>
+
+      {/* 이름 */}
+      <div style={{ marginBottom:16 }}>
         <div style={{ color:'#666',fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:8 }}>패드 이름</div>
         <input type="text" value={label} onChange={e=>setLabel(e.target.value)} placeholder="이름 입력..." maxLength={12} autoFocus />
       </div>
-      <div style={{ marginBottom:28 }}>
+
+      {/* 볼륨 */}
+      <div style={{ marginBottom:24 }}>
         <div style={{ display:'flex',justifyContent:'space-between',marginBottom:8 }}>
           <span style={{ color:'#666',fontSize:11,fontWeight:700,letterSpacing:1 }}>패드 볼륨</span>
           <span style={{ color:'#4CC9F0',fontSize:12,fontWeight:700 }}>{Math.round(vol*100)}%</span>
         </div>
         <input type="range" min={0} max={1} step={0.05} value={vol} onChange={e=>setVol(+e.target.value)} />
       </div>
+
       <div style={{ display:'flex',gap:10 }}>
-        <button onClick={onClose}                  style={{ flex:1,padding:'10px 0',borderRadius:10,border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontWeight:700,cursor:'pointer',fontSize:13 }}>취소</button>
-        <button onClick={()=>onSave(label.trim(),vol)} style={{ flex:1,padding:'10px 0',borderRadius:10,border:'none',background:'linear-gradient(135deg,#4CC9F0,#4361EE)',color:'#fff',fontWeight:700,cursor:'pointer',fontSize:13 }}>저장</button>
+        <button onClick={onClose}                         style={{ flex:1,padding:'10px 0',borderRadius:10,border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontWeight:700,cursor:'pointer',fontSize:13 }}>취소</button>
+        <button onClick={()=>onSave(label.trim(),vol,thumb)} style={{ flex:1,padding:'10px 0',borderRadius:10,border:'none',background:'linear-gradient(135deg,#4CC9F0,#4361EE)',color:'#fff',fontWeight:700,cursor:'pointer',fontSize:13 }}>저장</button>
       </div>
     </div>
   </>;
 }
 
+// ── Settings ──────────────────────────────────────────────────
 function Settings({ open, onClose, cfg, set, onReset }) {
-  const panelRef = useRef(null);
-  const dg = useRef({ on:false, y0:0, dy:0 });
+  const dg = useRef({on:false,y0:0,dy:0});
   const [ty, setTy] = useState(0);
   useEffect(() => { if (open) setTy(0); }, [open]);
-  const hDown = e => { dg.current = { on:true, y0:e.clientY||e.touches?.[0]?.clientY||0, dy:0 }; };
-  const hMove = e => { if (!dg.current.on) return; const y=Math.max(0,(e.clientY||e.touches?.[0]?.clientY||0)-dg.current.y0); dg.current.dy=y; setTy(y); };
-  const hUp   = () => { if (!dg.current.on) return; dg.current.on=false; if(dg.current.dy>120){onClose();setTy(0);}else setTy(0); };
+  const hDown = e => { dg.current={on:true,y0:e.clientY||e.touches?.[0]?.clientY||0,dy:0}; };
+  const hMove = e => { if(!dg.current.on) return; const y=Math.max(0,(e.clientY||e.touches?.[0]?.clientY||0)-dg.current.y0); dg.current.dy=y; setTy(y); };
+  const hUp   = () => { if(!dg.current.on) return; dg.current.on=false; if(dg.current.dy>120){onClose();setTy(0);}else setTy(0); };
   if (!open) return null;
-  const { cols, rows, maxRecMs, globalVolume, cameraFacing } = cfg;
+  const { cols, rows, maxRecMs, globalVolume, cameraFacing, defaultRecType } = cfg;
   const sBtn = a => ({ flex:1,padding:'8px 0',borderRadius:8,border:'none',cursor:'pointer',fontWeight:700,fontSize:12,background:a?'#4CC9F0':'#1A1A2E',color:a?'#000':'#555' });
   const stBtn = d => ({ width:36,height:36,borderRadius:8,border:'1px solid #2a2a3e',background:'#1A1A2E',color:d?'#333':'#fff',fontSize:20,cursor:d?'default':'pointer',display:'flex',alignItems:'center',justifyContent:'center' });
   const sec = { color:'#666',fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:10 };
@@ -142,7 +216,7 @@ function Settings({ open, onClose, cfg, set, onReset }) {
   const num = { color:'#fff',fontWeight:800,fontSize:18,minWidth:36,textAlign:'center' };
   return <>
     <div onClick={onClose} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:200 }} />
-    <div ref={panelRef} onMouseMove={hMove} onMouseUp={hUp} onTouchMove={hMove} onTouchEnd={hUp}
+    <div onMouseMove={hMove} onMouseUp={hUp} onTouchMove={hMove} onTouchEnd={hUp}
       style={{ position:'fixed',bottom:0,left:0,right:0,background:'#111128',borderRadius:'20px 20px 0 0',padding:'24px 24px 44px',zIndex:201,animation:ty===0?'slideUp 0.25s ease-out':'none',transform:`translateY(${ty}px)`,transition:dg.current.on?'none':'transform 0.25s ease-out',maxHeight:'90vh',overflowY:'auto' }}>
       <div onMouseDown={hDown} onTouchStart={hDown} style={{ width:'100%',padding:'0 0 20px',cursor:'grab',touchAction:'none' }}>
         <div style={{ width:40,height:4,background:'#444',borderRadius:2,margin:'0 auto' }} />
@@ -150,6 +224,16 @@ function Settings({ open, onClose, cfg, set, onReset }) {
       <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:28 }}>
         <span style={{ color:'#fff',fontWeight:800,fontSize:16 }}>⚙️ 환경설정</span>
         <button onClick={onClose} style={{ background:'none',border:'none',color:'#555',fontSize:20,cursor:'pointer' }}>✕</button>
+      </div>
+
+      {/* 기록 방식 */}
+      <div style={{ marginBottom:24 }}>
+        <div style={sec}>기본 기록 방식</div>
+        <div style={{ display:'flex',gap:8 }}>
+          <button style={sBtn(defaultRecType==='video')} onClick={()=>set('defaultRecType','video')}>🎬 영상 녹화</button>
+          <button style={sBtn(defaultRecType==='audio')} onClick={()=>set('defaultRecType','audio')}>🎙 음성 녹음</button>
+        </div>
+        <div style={{ color:'#444',fontSize:11,marginTop:8 }}>새 패드 녹화 시 기본 방식</div>
       </div>
 
       {/* 버튼 배치 */}
@@ -191,16 +275,15 @@ function Settings({ open, onClose, cfg, set, onReset }) {
         <input type="range" min={0} max={1} step={0.05} value={globalVolume} onChange={e=>set('globalVolume',+e.target.value)} />
       </div>
 
-      {/* 카메라 */}
+      {/* 카메라 (영상 모드일 때만 관련) */}
       <div style={{ marginBottom:32 }}>
-        <div style={sec}>카메라</div>
+        <div style={sec}>카메라 방향</div>
         <div style={{ display:'flex',gap:8 }}>
-          <button style={sBtn(cameraFacing==='user')}        onClick={()=>set('cameraFacing','user')}>📱 전면 카메라</button>
-          <button style={sBtn(cameraFacing==='environment')} onClick={()=>set('cameraFacing','environment')}>📷 후면 카메라</button>
+          <button style={sBtn(cameraFacing==='user')}        onClick={()=>set('cameraFacing','user')}>📱 전면</button>
+          <button style={sBtn(cameraFacing==='environment')} onClick={()=>set('cameraFacing','environment')}>📷 후면</button>
         </div>
       </div>
 
-      {/* 초기화 */}
       <button onClick={onReset} style={{ width:'100%',padding:'14px 0',borderRadius:12,border:'none',background:'#2a0a0a',color:'#FF4D6D',fontWeight:700,fontSize:14,cursor:'pointer' }}>
         🗑 전체 초기화
       </button>
@@ -208,64 +291,60 @@ function Settings({ open, onClose, cfg, set, onReset }) {
   </>;
 }
 
-// ── App ────────────────────────────────────────────────────────
+// ── App ───────────────────────────────────────────────────────
 function App() {
-  // Settings state
-  const [cols,         setCols]         = useState(4);
-  const [rows,         setRows]         = useState(3);
-  const [maxRecMs,     setMaxRecMs]     = useState(3000);
-  const [globalVolume, setGlobalVolume] = useState(1);
-  const [cameraFacing, setCameraFacing] = useState('user');
+  const [cols,           setCols]           = useState(4);
+  const [rows,           setRows]           = useState(3);
+  const [maxRecMs,       setMaxRecMs]       = useState(3000);
+  const [globalVolume,   setGlobalVolume]   = useState(1);
+  const [cameraFacing,   setCameraFacing]   = useState('user');
+  const [defaultRecType, setDefaultRecType] = useState('video'); // 'video' | 'audio'
 
-  // Core state
-  const [pads,        setPads]        = useState(() => Array(12).fill(null));
-  const [mode,        setMode]        = useState('play');
-  const [recIdx,      setRecIdx]      = useState(null);
-  const [countdown,   setCountdown]   = useState(null); // 3|2|1|null
-  const [playKeys,    setPlayKeys]    = useState({});
-  const [camReady,    setCamReady]    = useState(false);
-  const [recProg,     setRecProg]     = useState(0);
-  const [gridWidth,   setGridWidth]   = useState(300);
-  const [loading,     setLoading]     = useState(true);
+  const [pads,         setPads]         = useState(() => Array(12).fill(null));
+  const [mode,         setMode]         = useState('play');
+  const [recIdx,       setRecIdx]       = useState(null);
+  const [countdown,    setCountdown]    = useState(null);
+  const [playKeys,     setPlayKeys]     = useState({});
+  const [camReady,     setCamReady]     = useState(false);
+  const [recProg,      setRecProg]      = useState(0);
+  const [gridWidth,    setGridWidth]    = useState(300);
+  const [loading,      setLoading]      = useState(true);
+  const [currentRecType, setCurrentRecType] = useState('video'); // type being recorded now
 
-  // UI modals
   const [showSettings, setShowSettings] = useState(false);
   const [editPad,      setEditPad]      = useState(null);
-  const [confirm,      setConfirm]      = useState(null); // {msg, onOk}
+  const [confirm,      setConfirm]      = useState(null);
   const [toast,        setToast]        = useState(null);
+  const [dragFrom,     setDragFrom]     = useState(null);
+  const [dragTo,       setDragTo]       = useState(null);
 
-  // Drag state (visible)
-  const [dragFrom, setDragFrom] = useState(null);
-  const [dragTo,   setDragTo]   = useState(null);
-
-  // Refs — recording
-  const containerRef   = useRef(null);
-  const headerRef      = useRef(null);
-  const camVidRef      = useRef(null);
+  // Refs
+  const containerRef    = useRef(null);
+  const headerRef       = useRef(null);
+  const camVidRef       = useRef(null);
   const pendingThumbRef = useRef(null);
-  const cancelledRef   = useRef(false);
-  const mrRef          = useRef(null);
-  const chunksRef      = useRef([]);
-  const streamRef      = useRef(null);
-  const recTimerRef    = useRef(null);
-  const progTimerRef   = useRef(null);
-  const cdTimerRef     = useRef(null);
-  const toastTimerRef  = useRef(null);
-  const saveTimerRef   = useRef(null);
-  const initializedRef = useRef(false);
+  const cancelledRef    = useRef(false);
+  const mrRef           = useRef(null);
+  const chunksRef       = useRef([]);
+  const streamRef       = useRef(null);
+  const recTimerRef     = useRef(null);
+  const progTimerRef    = useRef(null);
+  const cdTimerRef      = useRef(null);
+  const toastTimerRef   = useRef(null);
+  const saveTimerRef    = useRef(null);
+  const initializedRef  = useRef(false);
+  const pressRef        = useRef(null);
+  const dragActiveRef   = useRef(false);
+  const ghostRef        = useRef(null);
 
-  // Refs — drag (avoid re-renders during move)
-  const pressRef      = useRef(null); // {idx, timer, x0, y0}
-  const dragActiveRef = useRef(false);
-  const ghostRef      = useRef(null);
-
-  // Live refs (for async callbacks)
-  const padsRef        = useRef(pads);
-  const colsRef        = useRef(cols);
-  const rowsRef        = useRef(rows);
-  const maxRecMsRef    = useRef(maxRecMs);
-  const globalVolRef   = useRef(globalVolume);
-  const camFacingRef   = useRef(cameraFacing);
+  // Live refs
+  const padsRef          = useRef(pads);
+  const colsRef          = useRef(cols);
+  const rowsRef          = useRef(rows);
+  const maxRecMsRef      = useRef(maxRecMs);
+  const globalVolRef     = useRef(globalVolume);
+  const camFacingRef     = useRef(cameraFacing);
+  const defRecTypeRef    = useRef(defaultRecType);
 
   useEffect(() => { padsRef.current = pads; },               [pads]);
   useEffect(() => { colsRef.current = cols; },               [cols]);
@@ -273,12 +352,17 @@ function App() {
   useEffect(() => { maxRecMsRef.current = maxRecMs; },       [maxRecMs]);
   useEffect(() => { globalVolRef.current = globalVolume; },  [globalVolume]);
   useEffect(() => { camFacingRef.current = cameraFacing; },  [cameraFacing]);
+  useEffect(() => { defRecTypeRef.current = defaultRecType; },[defaultRecType]);
 
   // ── Save ─────────────────────────────────────────────────────
-  const performSave = async (curPads) => {
-    const padMeta = curPads.map(p => p ? { thumb:p.thumb, label:p.label, volume:p.volume } : null);
-    await dbPut('metadata', { cols:colsRef.current, rows:rowsRef.current, maxRecMs:maxRecMsRef.current, globalVolume:globalVolRef.current, cameraFacing:camFacingRef.current, padMeta });
-    await Promise.all(curPads.map(async (p, i) => {
+  const performSave = async curPads => {
+    const padMeta = curPads.map(p => p ? { thumb:p.thumb, label:p.label, volume:p.volume, recType:p.recType } : null);
+    await dbPut('metadata', {
+      cols:colsRef.current, rows:rowsRef.current, maxRecMs:maxRecMsRef.current,
+      globalVolume:globalVolRef.current, cameraFacing:camFacingRef.current,
+      defaultRecType:defRecTypeRef.current, padMeta
+    });
+    await Promise.all(curPads.map(async (p,i) => {
       if (p?.url) { const blob = await fetch(p.url).then(r=>r.blob()); await dbPut(`blob_${i}`, blob); }
       else await dbDel(`blob_${i}`);
     }));
@@ -292,14 +376,12 @@ function App() {
     }, 400);
   };
 
-  // Settings changes → debounced auto-save
   useEffect(() => {
     if (!initializedRef.current) return;
     clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      performSave(padsRef.current).then(() => showToast('✅ 자동 저장됨')).catch(console.error);
-    }, 1000);
-  }, [cols, rows, maxRecMs, globalVolume, cameraFacing]);
+    saveTimerRef.current = setTimeout(() =>
+      performSave(padsRef.current).catch(console.error), 1000);
+  }, [cols, rows, maxRecMs, globalVolume, cameraFacing, defaultRecType]);
 
   // ── Load ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -307,33 +389,35 @@ function App() {
       try {
         const meta = await dbGet('metadata');
         if (meta) {
-          const { cols:c, rows:r, maxRecMs:mr, globalVolume:gv, cameraFacing:cf, padMeta } = meta;
-          if (c)               setCols(c);
-          if (r)               setRows(r);
-          if (mr)              setMaxRecMs(mr);
+          const { cols:c, rows:r, maxRecMs:mr, globalVolume:gv,
+                  cameraFacing:cf, defaultRecType:drt, padMeta } = meta;
+          if (c)              setCols(c);
+          if (r)              setRows(r);
+          if (mr)             setMaxRecMs(mr);
           if (gv !== undefined) setGlobalVolume(gv);
-          if (cf)              setCameraFacing(cf);
-          const total = (c||4) * (r||3);
+          if (cf)             setCameraFacing(cf);
+          if (drt)            setDefaultRecType(drt);
+          const total = (c||4)*(r||3);
           const np = Array(total).fill(null);
-          await Promise.all(Array.from({length:total},(_,i) => (async()=>{
+          for (let i = 0; i < total; i++) {
             if (padMeta?.[i]) {
               const blob = await dbGet(`blob_${i}`);
               if (blob) np[i] = { url:URL.createObjectURL(blob), ...padMeta[i] };
             }
-          })()));
-          setPads(np); padsRef.current = np;
+          }
+          setPads(np);
         }
-      } catch(e) { console.error(e); }
+      } catch(e) { console.error('Load:', e); }
       setLoading(false);
-      initializedRef.current = true;
+      setTimeout(() => { initializedRef.current = true; }, 200);
     })();
     return () => {
       clearTimeout(recTimerRef.current); clearInterval(progTimerRef.current);
-      clearTimeout(cdTimerRef.current); streamRef.current?.getTracks().forEach(t=>t.stop());
+      streamRef.current?.getTracks().forEach(t=>t.stop());
     };
   }, []);
 
-  // ── Camera → video element ───────────────────────────────────
+  // Camera → video after modal renders
   useEffect(() => {
     if (camReady && camVidRef.current && streamRef.current) {
       camVidRef.current.srcObject = streamRef.current;
@@ -341,79 +425,66 @@ function App() {
     }
   }, [camReady]);
 
-  // ── Grid size ─────────────────────────────────────────────────
+  // Grid size
   useEffect(() => {
     const compute = () => {
-      const h = containerRef.current ? containerRef.current.clientHeight : window.innerHeight;
-      const hh = headerRef.current ? headerRef.current.offsetHeight : 70;
-      const aw = window.innerWidth - 24;
-      const ah = h - hh - 8;
-      const cell = (ah - GAP*(rows-1)) / rows;
-      setGridWidth(Math.min(aw, cell*cols + GAP*(cols-1)));
+      const h = containerRef.current?.clientHeight || window.innerHeight;
+      const hh = headerRef.current?.offsetHeight || 70;
+      const availW = window.innerWidth - 24;
+      const availH = h - hh - 8;
+      const cellH = (availH - GAP*(rows-1)) / rows;
+      setGridWidth(Math.min(availW, cellH*cols + GAP*(cols-1)));
     };
     compute();
-    const onOrient = () => setTimeout(compute, 150);
+    const onOri = () => setTimeout(compute, 200);
     window.addEventListener('resize', compute);
-    window.addEventListener('orientationchange', onOrient);
-    return () => { window.removeEventListener('resize', compute); window.removeEventListener('orientationchange', onOrient); };
+    window.addEventListener('orientationchange', onOri);
+    return () => { window.removeEventListener('resize', compute); window.removeEventListener('orientationchange', onOri); };
   }, [cols, rows]);
 
-  // ── Resize pads array ────────────────────────────────────────
+  // Resize pads
   useEffect(() => {
     const total = cols * rows;
     setPads(prev => {
-      const n = Array(total).fill(null);
-      for (let i=0; i<Math.min(prev.length, total); i++) n[i] = prev[i];
-      padsRef.current = n; return n;
+      const next = Array(total).fill(null);
+      for (let i = 0; i < Math.min(prev.length, total); i++) next[i] = prev[i];
+      return next;
     });
   }, [cols, rows]);
 
-  // ── Clean drag on mode change ────────────────────────────────
-  useEffect(() => {
-    dragActiveRef.current = false; pressRef.current = null;
-    setDragFrom(null); setDragTo(null);
-    if (ghostRef.current) ghostRef.current.style.display = 'none';
-  }, [mode]);
-
-  // ── Helpers ──────────────────────────────────────────────────
   const showToast = msg => {
-    setToast(msg); clearTimeout(toastTimerRef.current);
+    setToast(msg);
+    clearTimeout(toastTimerRef.current);
     toastTimerRef.current = setTimeout(() => setToast(null), 2200);
   };
 
   const setSetting = (k, v) => {
-    if (k==='cols' || k==='rows') {
-      // 패드가 잘릴 수 있는지 확인
-      const newCols = k==='cols' ? v : cols;
-      const newRows = k==='rows' ? v : rows;
-      const newTotal = newCols * newRows;
-      const willLose = padsRef.current.slice(newTotal).some(p => p);
-      if (willLose) {
+    // Warn if shrinking will lose pads
+    if (k === 'cols' || k === 'rows') {
+      const nc = k==='cols' ? v : cols;
+      const nr = k==='rows' ? v : rows;
+      if (nc*nr < padsRef.current.length && padsRef.current.slice(nc*nr).some(p=>p)) {
         setConfirm({
-          msg: `버튼 수를 줄이면 범위 밖에 있는 패드의 녹화 내용이 영구 삭제됩니다. 계속하시겠습니까?`,
-          onOk: () => {
-            setConfirm(null);
-            if (k==='cols') setCols(v); else setRows(v);
-          }
+          msg:'버튼 수를 줄이면 범위 밖에 있는 패드의 녹화 내용이 영구 삭제됩니다. 계속하시겠습니까?',
+          onOk:() => { setConfirm(null); ({ cols:setCols, rows:setRows })[k](v); }
         });
         return;
       }
-      if (k==='cols') setCols(v); else setRows(v);
-      return;
+      ({ cols:setCols, rows:setRows })[k](v); return;
     }
-    if (k==='maxRecMs')      setMaxRecMs(v);
-    else if (k==='globalVolume')  setGlobalVolume(v);
-    else if (k==='cameraFacing')  setCameraFacing(v);
+    if (k==='maxRecMs')       setMaxRecMs(v);
+    else if (k==='globalVolume')   setGlobalVolume(v);
+    else if (k==='cameraFacing')   setCameraFacing(v);
+    else if (k==='defaultRecType') setDefaultRecType(v);
   };
 
-  // ── Reset ────────────────────────────────────────────────────
   const handleReset = () => {
     setConfirm({ msg:'모든 패드를 초기화할까요?\n녹화된 내용이 모두 삭제됩니다.', onOk: async () => {
       setConfirm(null);
       padsRef.current.forEach(p => { if (p?.url) URL.revokeObjectURL(p.url); });
       await dbClear();
       const empty = Array(cols*rows).fill(null);
-      setPads(empty); padsRef.current = empty;
+      padsRef.current = empty; setPads(empty); setPlayKeys({});
       setShowSettings(false); showToast('초기화됐습니다');
     }});
   };
@@ -427,29 +498,44 @@ function App() {
     setCamReady(false); setCountdown(null); setRecIdx(null); setRecProg(0);
   }, []);
 
-  const beginRecording = (stream, idx) => {
+  const beginRecording = (stream, idx, recType) => {
     chunksRef.current = [];
-    const mr = new MediaRecorder(stream, getMime() ? {mimeType:getMime()} : {});
+    const mime = recType === 'audio' ? getAudioMime() : getVideoMime();
+    const mr = new MediaRecorder(stream, mime ? {mimeType:mime} : {});
     mrRef.current = mr;
     mr.ondataavailable = e => { if (e.data.size>0) chunksRef.current.push(e.data); };
     mr.onstop = () => {
-      const blob = new Blob(chunksRef.current, {type:'video/webm'});
+      const blobType = recType === 'audio' ? 'audio/webm' : 'video/webm';
+      const blob = new Blob(chunksRef.current, {type:blobType});
       const url  = URL.createObjectURL(blob);
-      // Revoke old URL
-      const old = padsRef.current[idx];
+      const old  = padsRef.current[idx];
       if (old?.url) URL.revokeObjectURL(old.url);
-      const newPad = { url, thumb:null, label:old?.label||'', volume:old?.volume??1 };
+
+      // Thumbnail: from live camera (video) or generate mic icon (audio)
+      let thumb = pendingThumbRef.current;
+      pendingThumbRef.current = null;
+      if (!thumb && recType === 'audio') {
+        // Generate audio placeholder thumb
+        const c = document.createElement('canvas');
+        c.width = 200; c.height = 200;
+        const ctx = c.getContext('2d');
+        const color = pColor(idx);
+        ctx.fillStyle = color + '33';
+        ctx.fillRect(0, 0, 200, 200);
+        ctx.font = '80px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🎙', 100, 100);
+        thumb = c.toDataURL('image/jpeg', 0.8);
+      }
+
+      const newPad = { url, thumb, label:old?.label||'', volume:old?.volume??1, recType };
       const np = [...padsRef.current]; np[idx] = newPad;
       padsRef.current = np; setPads([...np]);
       stream.getTracks().forEach(t=>t.stop()); streamRef.current = null;
-      setCamReady(false); setCountdown(null); setRecIdx(null); setRecProg(0); clearInterval(progTimerRef.current);
-      // 라이브 캡처 썸네일 사용 (WebM seek iOS 미지원 우회)
-      const thumb = pendingThumbRef.current;
-      pendingThumbRef.current = null;
-      const fp = { ...newPad, thumb };
-      const fp2 = [...padsRef.current]; fp2[idx] = fp;
-      padsRef.current = fp2; setPads([...fp2]);
-      autoSave(fp2);
+      setCamReady(false); setCountdown(null); setRecIdx(null); setRecProg(0);
+      clearInterval(progTimerRef.current);
+      autoSave(np);
     };
     mr.start(100); setRecIdx(idx);
     let elapsed = 0;
@@ -462,11 +548,15 @@ function App() {
 
   const startRecordFlow = async idx => {
     cancelledRef.current = false;
+    const recType = defRecTypeRef.current;
+    setCurrentRecType(recType);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video:{facingMode:camFacingRef.current}, audio:true });
+      const constraints = recType === 'audio'
+        ? { audio:true }
+        : { video:{facingMode:camFacingRef.current}, audio:true };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       if (cancelledRef.current) { stream.getTracks().forEach(t=>t.stop()); return; }
       streamRef.current = stream; setCamReady(true);
-      // Countdown 3→2→1
       let c = 3; setCountdown(c);
       await new Promise(resolve => {
         const tick = () => {
@@ -477,12 +567,11 @@ function App() {
         };
         cdTimerRef.current = setTimeout(tick, 1000);
       });
-      if (!cancelledRef.current) beginRecording(stream, idx);
+      if (!cancelledRef.current) beginRecording(stream, idx, recType);
     } catch(e) { console.error(e); cancelRecordFlow(); }
   };
 
   const stopRecord = useCallback(() => {
-    // Capture thumbnail from live camera BEFORE stopping (iOS WebM 미지원 우회)
     const lv = camVidRef.current;
     if (lv && lv.readyState >= 2 && lv.videoWidth > 0) {
       try {
@@ -503,7 +592,6 @@ function App() {
     if (!padsRef.current[idx]) return;
     setPlayKeys(k => ({ ...k, [idx]:(k[idx]||0)+1 }));
   }, []);
-
   const stopPad = useCallback(idx => {
     setPlayKeys(k => { const n={...k}; delete n[idx]; return n; });
   }, []);
@@ -516,22 +604,20 @@ function App() {
     setConfirm({
       msg: `${name}의 녹화 내용을 삭제할까요?`,
       onOk: () => {
-        setConfirm(null);
-        stopPad(idx);
+        setConfirm(null); stopPad(idx);
         if (padsRef.current[idx]?.url) URL.revokeObjectURL(padsRef.current[idx].url);
         const np = [...padsRef.current]; np[idx] = null;
-        padsRef.current = np; setPads([...np]);
-        autoSave(np);
+        padsRef.current = np; setPads([...np]); autoSave(np);
       }
     });
   };
 
   // ── Edit ──────────────────────────────────────────────────────
-  const openEdit = (e, idx) => { e.stopPropagation(); setEditPad({idx}); };
-  const saveEdit = (label, volume) => {
+  const openEdit  = (e, idx) => { e.stopPropagation(); setEditPad({idx}); };
+  const saveEdit  = (label, volume, thumb) => {
     const {idx} = editPad;
     const np = [...padsRef.current];
-    if (np[idx]) { np[idx] = {...np[idx], label, volume}; padsRef.current = np; setPads([...np]); autoSave(np); }
+    if (np[idx]) { np[idx] = {...np[idx], label, volume, thumb}; padsRef.current = np; setPads([...np]); autoSave(np); }
     setEditPad(null);
   };
 
@@ -542,7 +628,7 @@ function App() {
         ghostRef.current.style.left = (e.clientX-40)+'px';
         ghostRef.current.style.top  = (e.clientY-40)+'px';
       }
-      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const el  = document.elementFromPoint(e.clientX, e.clientY);
       const pidx = el?.closest('[data-pi]') ? parseInt(el.closest('[data-pi]').dataset.pi) : null;
       setDragTo(pidx !== dragFrom ? pidx : null);
       return;
@@ -556,15 +642,14 @@ function App() {
 
   const handleGlobalUp = e => {
     if (dragActiveRef.current) {
-      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const el   = document.elementFromPoint(e.clientX, e.clientY);
       const pidx = el?.closest('[data-pi]') ? parseInt(el.closest('[data-pi]').dataset.pi) : null;
       if (pidx !== null && pidx !== dragFrom) {
         const np = [...padsRef.current];
         [np[dragFrom], np[pidx]] = [np[pidx], np[dragFrom]];
-        padsRef.current = np; setPads([...np]); autoSave(np);
+        padsRef.current = np; setPads([...np]); autoSave(np, true);
       }
       dragActiveRef.current = false;
-      // Release pointer capture so subsequent taps work on iOS
       try { e.target.releasePointerCapture?.(e.pointerId); } catch {}
       if (ghostRef.current) ghostRef.current.style.display = 'none';
       setDragFrom(null); setDragTo(null); pressRef.current = null;
@@ -573,10 +658,9 @@ function App() {
     if (pressRef.current) {
       const {idx} = pressRef.current;
       clearTimeout(pressRef.current.timer); pressRef.current = null;
-      // Tap = record
-      if (recIdx !== null) return; // already recording
+      if (recIdx !== null) return;
       if (padsRef.current[idx]) {
-        setConfirm({ msg:'패드를 다시 녹화할까요?\n기존 녹화가 삭제됩니다.', onOk:() => { setConfirm(null); startRecordFlow(idx); } });
+        setConfirm({ msg:'패드를 다시 녹화할까요?\n기존 녹화가 삭제됩니다.', onOk:()=>{ setConfirm(null); startRecordFlow(idx); } });
       } else {
         startRecordFlow(idx);
       }
@@ -588,7 +672,6 @@ function App() {
     if (recIdx !== null) return;
     const x0=e.clientX, y0=e.clientY;
     const timer = setTimeout(() => {
-      // Long press → drag
       dragActiveRef.current = true; setDragFrom(idx);
       if (ghostRef.current) {
         const p = padsRef.current[idx];
@@ -614,10 +697,10 @@ function App() {
       <div ref={headerRef} style={{ width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 0 12px',gap:8,flexShrink:0 }}>
         <div>
           <div style={{ color:'#fff',fontSize:18,fontWeight:800,letterSpacing:-0.5 }}>
-            🎛 사운드 패드 <span style={{ fontSize:11,color:'#4CC9F0',fontWeight:700,verticalAlign:'middle' }}>Beta</span>
+            🎛 클래스 패드 <span style={{ fontSize:11,color:'#4CC9F0',fontWeight:700,verticalAlign:'middle' }}>Beta</span>
           </div>
           <div style={{ color:'#555',fontSize:10,marginTop:2 }}>
-            {mode==='record' ? (dragFrom!==null ? '놓을 위치로 이동' : '탭: 녹화 | 꾹: 순서 변경') : '패드를 눌러 재생'}
+            {mode==='record' ? (dragFrom!==null ? '놓을 위치로 이동' : `탭: ${defaultRecType==='audio'?'🎙 녹음':'🎬 녹화'} | 꾹: 순서 변경`) : '패드를 눌러 재생'}
           </div>
         </div>
         <div style={{ display:'flex',gap:7,alignItems:'center' }}>
@@ -634,31 +717,58 @@ function App() {
           const pad=pads[i], isRec=recIdx===i, playKey=playKeys[i], isPlay=!!playKey;
           const color=pColor(i), vol=(pad?.volume??1)*globalVolume;
           const isDragFrom=dragFrom===i, isDragTo=dragTo===i;
+          const isAudio = pad?.recType === 'audio';
           return (
             <div key={i} data-pi={i} onPointerDown={e=>handlePadDown(e,i)} style={{
-              aspectRatio:'1', borderRadius:16,
-              background: pad?.thumb&&!isPlay ? `url(${pad.thumb}) center/cover` : `${color}22`,
-              border: isDragTo?`2.5px solid #fff` : isRec?`2.5px solid #FF4D6D` : isPlay?`2.5px solid ${color}` : `2px solid ${color}44`,
+              aspectRatio:'1',borderRadius:16,
+              background: pad?.thumb&&!isPlay&&!isDragFrom ? `url(${pad.thumb}) center/cover` : `${color}22`,
+              border: isDragTo?`2.5px solid #fff`:isRec?`2.5px solid #FF4D6D`:isPlay?`2.5px solid ${color}`:`2px solid ${color}44`,
               display:'flex',alignItems:'center',justifyContent:'center',
               cursor:'pointer',position:'relative',overflow:'hidden',
               transition:'transform 0.08s,box-shadow 0.08s,opacity 0.12s',
-              transform: isPlay?'scale(0.93)':isDragFrom?'scale(0.85)':'scale(1)',
-              opacity: isDragFrom ? 0.35 : 1,
-              boxShadow: isDragTo?'0 0 28px rgba(255,255,255,0.5)' : isPlay?`0 0 28px ${color}aa` : isRec?'0 0 24px rgba(255,77,109,0.6)' : 'none',
+              transform:isPlay?'scale(0.93)':isDragFrom?'scale(0.85)':'scale(1)',
+              opacity:isDragFrom?0.35:1,
+              boxShadow:isDragTo?'0 0 28px rgba(255,255,255,0.5)':isPlay?`0 0 28px ${color}aa`:isRec?'0 0 24px rgba(255,77,109,0.6)':'none',
               touchAction:'none',
             }}>
-              {pad&&isPlay&&<PadVideo key={playKey} url={pad.url} volume={vol} onEnd={()=>stopPad(i)} />}
+              {/* Playback */}
+              {pad&&isPlay&&(
+                isAudio
+                  ? <PadAudio key={playKey} url={pad.url} volume={vol} onEnd={()=>stopPad(i)} />
+                  : <PadVideo key={playKey} url={pad.url} volume={vol} onEnd={()=>stopPad(i)} />
+              )}
+
+              {/* Play glow */}
               {isPlay&&<div style={{ position:'absolute',inset:0,zIndex:2,pointerEvents:'none',background:`linear-gradient(to top,${color}55 0%,transparent 60%)`,borderRadius:14 }} />}
 
+              {/* Empty state */}
               {!pad&&(
                 <div style={{ textAlign:'center',position:'relative',zIndex:2 }}>
                   <div style={{ fontSize:cols>=6?20:30 }}>{pEmoji(i)}</div>
-                  {mode==='record'&&<div style={{ color,fontSize:cols>=6?10:12,fontWeight:700,marginTop:3,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:'90%' }}>탭하여 녹화</div>}
+                  {mode==='record'&&<div style={{ color,fontSize:cols>=6?10:12,fontWeight:700,marginTop:3,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:'90%' }}>
+                    {defaultRecType==='audio'?'🎙 탭하여 녹음':'🎬 탭하여 녹화'}
+                  </div>}
                 </div>
               )}
 
+              {/* Gradient overlay */}
               {pad&&!isPlay&&!isRec&&<div style={{ position:'absolute',inset:0,zIndex:2,background:'linear-gradient(to top,rgba(0,0,0,0.55) 0%,transparent 55%)',borderRadius:14 }} />}
 
+              {/* Audio playing wave indicator */}
+              {pad&&isPlay&&isAudio&&(
+                <div style={{ position:'absolute',inset:0,zIndex:3,display:'flex',alignItems:'center',justifyContent:'center',gap:3 }}>
+                  {[0,80,160,240,320].map(d=>(
+                    <div key={d} style={{ width:4,borderRadius:2,background:color,animation:`wave 0.8s ease-in-out ${d}ms infinite` }} />
+                  ))}
+                </div>
+              )}
+
+              {/* Audio badge on pad */}
+              {pad&&isAudio&&!isPlay&&!isRec&&(
+                <div style={{ position:'absolute',bottom:pad?.label?22:6,right:6,zIndex:4,background:'rgba(0,0,0,0.7)',borderRadius:10,padding:'2px 5px',fontSize:9,color:'#9B5DE5',fontWeight:700 }}>🎙</div>
+              )}
+
+              {/* REC badge */}
               {isRec&&(
                 <div style={{ position:'absolute',top:6,left:6,zIndex:5,display:'flex',alignItems:'center',gap:3,background:'rgba(0,0,0,0.8)',borderRadius:20,padding:'2px 7px' }}>
                   <div style={{ width:6,height:6,borderRadius:'50%',background:'#FF4D6D',animation:'blink 0.5s alternate infinite' }} />
@@ -666,6 +776,7 @@ function App() {
                 </div>
               )}
 
+              {/* Record mode controls */}
               {pad&&mode==='record'&&!isRec&&!isDragFrom&&(
                 <>
                   <button onPointerDown={e=>deletePad(e,i)} style={{ position:'absolute',top:5,right:5,zIndex:10,width:28,height:28,borderRadius:'50%',background:'rgba(0,0,0,0.8)',border:'none',color:'#fff',fontSize:14,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>✕</button>
@@ -673,6 +784,7 @@ function App() {
                 </>
               )}
 
+              {/* Label */}
               {pad?.label&&!isRec&&!isDragFrom&&(
                 <div style={{ position:'absolute',bottom:0,left:0,right:0,zIndex:3,padding:'4px 6px',textAlign:'center',color:'#fff',fontSize:cols>=6?13:17,fontWeight:700,textShadow:'0 1px 4px rgba(0,0,0,0.8)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}>{pad.label}</div>
               )}
@@ -684,44 +796,69 @@ function App() {
       {/* Drag Ghost */}
       <div ref={ghostRef} style={{ display:'none',position:'fixed',width:80,height:80,borderRadius:14,border:'2px solid #fff',opacity:0.85,pointerEvents:'none',zIndex:999,backgroundSize:'cover',backgroundPosition:'center' }} />
 
-      {/* Camera + Countdown Modal */}
+      {/* Recording Modal */}
       {camReady&&(
         <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.93)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',zIndex:300,gap:14 }}>
           <div style={{ color:countdown!==null?'#4CC9F0':'#FF4D6D',fontWeight:800,fontSize:14,letterSpacing:2 }}>
-            {countdown!==null ? '녹화 준비...' : '🔴 녹화 중'}
+            {countdown!==null ? '녹화 준비...' : (currentRecType==='audio'?'🎙 녹음 중':'🔴 녹화 중')}
           </div>
 
-          <div style={{ position:'relative',width:280,height:210 }}>
-            <video ref={camVidRef} muted autoPlay playsInline style={{
-              width:'100%',height:'100%',borderRadius:16,
-              border:`2px solid ${countdown!==null?'#4CC9F0':'#FF4D6D'}`,
-              background:'#000',objectFit:'cover',
-              boxShadow:`0 0 40px ${countdown!==null?'rgba(76,201,240,0.4)':'rgba(255,77,109,0.4)'}`,
-              transform:cameraFacing==='user'?'scaleX(-1)':'none',
-            }} />
-            {countdown!==null&&(
-              <div style={{ position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.3)',borderRadius:14 }}>
-                <div key={countdown} style={{ fontSize:88,fontWeight:900,color:'#fff',textShadow:'0 0 40px rgba(76,201,240,0.9)',position:'absolute',top:'50%',left:'50%',animation:'countPop 0.7s ease-out forwards' }}>
+          {/* Video preview (video mode only) */}
+          {currentRecType === 'video' && (
+            <div style={{ position:'relative',width:280,height:210 }}>
+              <video ref={camVidRef} muted autoPlay playsInline style={{
+                width:'100%',height:'100%',borderRadius:16,
+                border:`2px solid ${countdown!==null?'#4CC9F0':'#FF4D6D'}`,
+                background:'#000',objectFit:'cover',
+                boxShadow:`0 0 40px ${countdown!==null?'rgba(76,201,240,0.4)':'rgba(255,77,109,0.4)'}`,
+                transform:cameraFacing==='user'?'scaleX(-1)':'none',
+              }} />
+              {countdown!==null&&(
+                <div style={{ position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.3)',borderRadius:14 }}>
+                  <div key={countdown} style={{ fontSize:88,fontWeight:900,color:'#fff',textShadow:'0 0 40px rgba(76,201,240,0.9)',position:'absolute',top:'50%',left:'50%',animation:'countPop 0.7s ease-out forwards' }}>
+                    {countdown}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Audio mode UI */}
+          {currentRecType === 'audio' && (
+            <div style={{ width:200,height:120,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16 }}>
+              {countdown!==null ? (
+                <div key={countdown} style={{ fontSize:88,fontWeight:900,color:'#4CC9F0',textShadow:'0 0 40px rgba(76,201,240,0.9)',animation:'countPop 0.7s ease-out forwards' }}>
                   {countdown}
                 </div>
-              </div>
-            )}
-          </div>
+              ) : (
+                <>
+                  <div style={{ fontSize:56,animation:'pulse 1s ease-in-out infinite' }}>🎙</div>
+                  <div style={{ display:'flex',alignItems:'flex-end',gap:4,height:40 }}>
+                    {[0,120,240,360,480].map(d=>(
+                      <div key={d} style={{ width:6,borderRadius:3,background:'#9B5DE5',animation:`wave 0.8s ease-in-out ${d}ms infinite` }} />
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           {countdown===null&&(
             <>
               <div style={{ width:280,height:5,background:'#222',borderRadius:3,overflow:'hidden' }}>
-                <div style={{ height:'100%',width:`${recProg*100}%`,background:'linear-gradient(90deg,#FF4D6D,#FF6B35)',borderRadius:3,transition:'width 0.1s linear' }} />
+                <div style={{ height:'100%',width:`${recProg*100}%`,background: currentRecType==='audio'?'linear-gradient(90deg,#9B5DE5,#F72585)':'linear-gradient(90deg,#FF4D6D,#FF6B35)',borderRadius:3,transition:'width 0.1s linear' }} />
               </div>
               <div style={{ color:'#555',fontSize:11 }}>{maxRecMs/1000}초 최대 · 완료 후 자동 저장</div>
-              <button onClick={stopRecord} style={{ padding:'12px 32px',borderRadius:50,border:'none',background:'linear-gradient(135deg,#FF4D6D,#FF6B35)',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',boxShadow:'0 0 24px rgba(255,77,109,0.5)' }}>⏹ 녹화 완료</button>
+              <button onClick={stopRecord} style={{ padding:'12px 32px',borderRadius:50,border:'none',background: currentRecType==='audio'?'linear-gradient(135deg,#9B5DE5,#F72585)':'linear-gradient(135deg,#FF4D6D,#FF6B35)',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',boxShadow:'0 0 24px rgba(255,77,109,0.5)' }}>
+                ⏹ {currentRecType==='audio'?'녹음 완료':'녹화 완료'}
+              </button>
             </>
           )}
           <button onClick={cancelRecordFlow} style={{ background:'none',border:'none',color:'#555',fontSize:13,cursor:'pointer' }}>취소</button>
         </div>
       )}
 
-      <Settings open={showSettings} onClose={()=>setShowSettings(false)} cfg={{cols,rows,maxRecMs,globalVolume,cameraFacing}} set={setSetting} onReset={handleReset} />
+      <Settings open={showSettings} onClose={()=>setShowSettings(false)} cfg={{cols,rows,maxRecMs,globalVolume,cameraFacing,defaultRecType}} set={setSetting} onReset={handleReset} />
       {editPad&&<EditModal pad={pads[editPad.idx]} onSave={saveEdit} onClose={()=>setEditPad(null)} />}
       {confirm&&<Confirm msg={confirm.msg} onOk={confirm.onOk} onCancel={()=>setConfirm(null)} />}
       {toast&&<Toast msg={toast} />}
