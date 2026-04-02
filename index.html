@@ -243,6 +243,7 @@ function App() {
   const headerRef      = useRef(null);
   const camVidRef      = useRef(null);
   const pendingThumbRef = useRef(null);
+  const cancelledRef   = useRef(false);
   const mrRef          = useRef(null);
   const chunksRef      = useRef([]);
   const streamRef      = useRef(null);
@@ -419,6 +420,7 @@ function App() {
 
   // ── Record ───────────────────────────────────────────────────
   const cancelRecordFlow = useCallback(() => {
+    cancelledRef.current = true;
     clearTimeout(cdTimerRef.current); clearTimeout(recTimerRef.current); clearInterval(progTimerRef.current);
     if (mrRef.current?.state !== 'inactive') mrRef.current.stop();
     streamRef.current?.getTracks().forEach(t=>t.stop()); streamRef.current = null;
@@ -459,16 +461,23 @@ function App() {
   };
 
   const startRecordFlow = async idx => {
+    cancelledRef.current = false;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video:{facingMode:camFacingRef.current}, audio:true });
+      if (cancelledRef.current) { stream.getTracks().forEach(t=>t.stop()); return; }
       streamRef.current = stream; setCamReady(true);
       // Countdown 3→2→1
       let c = 3; setCountdown(c);
       await new Promise(resolve => {
-        const tick = () => { c--; if (c>0){setCountdown(c);cdTimerRef.current=setTimeout(tick,1000);}else{setCountdown(null);resolve();} };
+        const tick = () => {
+          if (cancelledRef.current) { resolve(); return; }
+          c--;
+          if (c > 0) { setCountdown(c); cdTimerRef.current = setTimeout(tick, 1000); }
+          else { setCountdown(null); resolve(); }
+        };
         cdTimerRef.current = setTimeout(tick, 1000);
       });
-      beginRecording(stream, idx);
+      if (!cancelledRef.current) beginRecording(stream, idx);
     } catch(e) { console.error(e); cancelRecordFlow(); }
   };
 
@@ -546,6 +555,8 @@ function App() {
         padsRef.current = np; setPads([...np]); autoSave(np);
       }
       dragActiveRef.current = false;
+      // Release pointer capture so subsequent taps work on iOS
+      try { e.target.releasePointerCapture?.(e.pointerId); } catch {}
       if (ghostRef.current) ghostRef.current.style.display = 'none';
       setDragFrom(null); setDragTo(null); pressRef.current = null;
       return;
@@ -587,7 +598,7 @@ function App() {
   if (loading) return <div style={{ height:'100dvh',display:'flex',alignItems:'center',justifyContent:'center',color:'#555',fontSize:14 }}>불러오는 중...</div>;
 
   return (
-    <div ref={containerRef} onPointerMove={handleGlobalMove} onPointerUp={handleGlobalUp}
+    <div ref={containerRef} onPointerMove={handleGlobalMove} onPointerUp={handleGlobalUp} onPointerCancel={handleGlobalUp}
       style={{ height:'100dvh',display:'flex',flexDirection:'column',alignItems:'center',padding:'0 12px 0',overflow:'hidden' }}>
 
       {/* Header */}
@@ -632,8 +643,8 @@ function App() {
 
               {!pad&&(
                 <div style={{ textAlign:'center',position:'relative',zIndex:2 }}>
-                  <div style={{ fontSize:cols>=6?16:24 }}>{pEmoji(i)}</div>
-                  {mode==='record'&&<div style={{ color,fontSize:9,fontWeight:700,marginTop:3,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:'90%' }}>탭하여 녹화</div>}
+                  <div style={{ fontSize:cols>=6?20:30 }}>{pEmoji(i)}</div>
+                  {mode==='record'&&<div style={{ color,fontSize:cols>=6?10:12,fontWeight:700,marginTop:3,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:'90%' }}>탭하여 녹화</div>}
                 </div>
               )}
 
@@ -648,13 +659,13 @@ function App() {
 
               {pad&&mode==='record'&&!isRec&&!isDragFrom&&(
                 <>
-                  <button onPointerDown={e=>deletePad(e,i)} style={{ position:'absolute',top:5,right:5,zIndex:10,width:20,height:20,borderRadius:'50%',background:'rgba(0,0,0,0.8)',border:'none',color:'#fff',fontSize:11,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>✕</button>
-                  <button onPointerDown={e=>openEdit(e,i)}  style={{ position:'absolute',top:5,left:5,zIndex:10,width:20,height:20,borderRadius:'50%',background:'rgba(0,0,0,0.8)',border:'none',color:'#4CC9F0',fontSize:11,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>✏️</button>
+                  <button onPointerDown={e=>deletePad(e,i)} style={{ position:'absolute',top:5,right:5,zIndex:10,width:28,height:28,borderRadius:'50%',background:'rgba(0,0,0,0.8)',border:'none',color:'#fff',fontSize:14,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>✕</button>
+                  <button onPointerDown={e=>openEdit(e,i)}  style={{ position:'absolute',top:5,left:5,zIndex:10,width:28,height:28,borderRadius:'50%',background:'rgba(0,0,0,0.8)',border:'none',color:'#4CC9F0',fontSize:14,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>✏️</button>
                 </>
               )}
 
               {pad?.label&&!isRec&&!isDragFrom&&(
-                <div style={{ position:'absolute',bottom:0,left:0,right:0,zIndex:3,padding:'4px 6px',textAlign:'center',color:'#fff',fontSize:cols>=6?11:14,fontWeight:700,textShadow:'0 1px 4px rgba(0,0,0,0.8)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}>{pad.label}</div>
+                <div style={{ position:'absolute',bottom:0,left:0,right:0,zIndex:3,padding:'4px 6px',textAlign:'center',color:'#fff',fontSize:cols>=6?13:17,fontWeight:700,textShadow:'0 1px 4px rgba(0,0,0,0.8)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}>{pad.label}</div>
               )}
             </div>
           );
