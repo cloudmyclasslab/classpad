@@ -979,7 +979,7 @@ function App() {
           return (
             <div key={i} data-pi={i} onPointerDown={e=>handlePadDown(e,i)} style={{
               aspectRatio:'1',borderRadius:16,
-              background: pad?.thumb&&!isPlay&&!isDragFrom ? `url(${pad.thumb}) center/cover` : `${color}22`,
+              background: pad?.thumb&&!(isPlay&&!isAudio)&&!isDragFrom ? `url(${pad.thumb}) center/cover` : `${color}22`,
               border: isDragTo?`2.5px solid #fff`:isRec?`2.5px solid #FF4D6D`:isPlay?`2.5px solid ${color}`:`2px solid ${color}44`,
               display:'flex',alignItems:'center',justifyContent:'center',
               cursor:'pointer',position:'relative',overflow:'hidden',
