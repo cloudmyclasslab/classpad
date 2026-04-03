@@ -688,7 +688,7 @@ function App() {
   };
 
   const handleReset = () => {
-    setConfirm({ msg:'모든 패드를 초기화할까요?\n녹화된 내용이 모두 삭제됩니다.', onOk: async () => {
+    setConfirm({ msg:'모든 패드를 초기화할까요?\n녹화·녹음된 내용과 저장된 구성이 모두 삭제됩니다.', onOk: async () => {
       setConfirm(null);
       padsRef.current.forEach(p => { if (p?.url) URL.revokeObjectURL(p.url); });
       await dbClear();
