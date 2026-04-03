@@ -439,7 +439,7 @@ function Settings({ open, onClose, cfg, set, onReset }) {
           <button style={sBtn(defaultRecType==='video')} onClick={()=>set('defaultRecType','video')}>🎬 영상 녹화</button>
           <button style={sBtn(defaultRecType==='audio')} onClick={()=>set('defaultRecType','audio')}>🎙 음성 녹음</button>
         </div>
-        <div style={{ color:'#444',fontSize:11,marginTop:8 }}>새 패드 녹화 시 기본 방식</div>
+        <div style={{ color:'#444',fontSize:11,marginTop:8 }}>{defaultRecType==='audio' ? '새 패드 녹음 시 기본 방식' : '새 패드 녹화 시 기본 방식'}</div>
       </div>
 
       {/* 버튼 배치 */}
@@ -466,7 +466,7 @@ function Settings({ open, onClose, cfg, set, onReset }) {
 
       {/* 녹화 시간 */}
       <div style={{ marginBottom:24 }}>
-        <div style={sec}>최대 녹화 시간</div>
+        <div style={sec}>{defaultRecType==='audio' ? '최대 녹음 시간' : '최대 녹화 시간'}</div>
         <div style={{ display:'flex',gap:8 }}>
           {[1000,3000,5000].map(ms=><button key={ms} style={sBtn(maxRecMs===ms)} onClick={()=>set('maxRecMs',ms)}>{ms/1000}초</button>)}
         </div>
