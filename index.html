@@ -812,7 +812,7 @@ function App() {
 
   // ── Save ─────────────────────────────────────────────────────
   const performSave = async curPads => {
-    const padMeta = curPads.map(p => p ? { thumb:p.thumb, label:p.label, volume:p.volume, recType:p.recType } : null);
+    const padMeta = curPads.map(p => p ? { thumb:p.thumb, label:p.label, volume:p.volume, recType:p.recType, trimStart:p.trimStart, trimEnd:p.trimEnd } : null);
     await dbPut('metadata', {
       cols:colsRef.current, rows:rowsRef.current, maxRecMs:maxRecMsRef.current,
       globalVolume:globalVolRef.current, cameraFacing:camFacingRef.current,
@@ -949,7 +949,7 @@ function App() {
   // ── Config save/load ─────────────────────────────────────────
   const handleSaveConfig = async name => {
     const id = Date.now().toString();
-    const padMeta = padsRef.current.map(p => p ? { thumb:p.thumb, label:p.label, volume:p.volume, recType:p.recType } : null);
+    const padMeta = padsRef.current.map(p => p ? { thumb:p.thumb, label:p.label, volume:p.volume, recType:p.recType, trimStart:p.trimStart, trimEnd:p.trimEnd } : null);
     // Save blobs under config namespace
     await Promise.all(padsRef.current.map(async (p, i) => {
       if (p?.url) { const blob = await fetch(p.url).then(r=>r.blob()); await dbPut(`cfg_${id}_blob_${i}`, blob); }
