@@ -1283,8 +1283,6 @@ function App() {
   const handleGazeCalibDone = useCallback(async () => {
     setGazeCalib(false);
     setGazeMode(true);
-    window.webgazer?.showVideo(false);
-    window.webgazer?.showPredictionPoints(false);
     // 캘리브레이션 포인트 DB 저장
     try {
       await dbPut('gaze_calibration', {
@@ -1307,9 +1305,11 @@ function App() {
   }, []);
 
   const startGazeEngine = useCallback(async () => {
-    window.webgazer.params.showVideoPreview = true;
+    // begin 전에 video preview 비활성화 (begin 후 showVideo 호출 금지 - prediction loop 멈춤)
+    window.webgazer.params.showVideoPreview = false;
     window.webgazer.params.showFaceOverlay  = false;
     window.webgazer.params.showFaceFeedbackBox = false;
+    window.webgazer.params.saveDataAcrossSessions = false;
 
     await window.webgazer
       .setRegression('ridge')
@@ -1350,6 +1350,24 @@ function App() {
         }
       })
       .begin();
+
+    // WebGazer가 body에 추가하는 video/canvas를 CSS로 구석에 숨김 (DOM 제거 X - prediction 유지)
+    setTimeout(() => {
+      const wgVideo = document.getElementById('webgazerVideoFeed');
+      const wgCanvas = document.getElementById('webgazerFaceOverlay');
+      const wgFace = document.getElementById('webgazerFaceFeedbackBox');
+      [wgVideo, wgCanvas, wgFace].forEach(el => {
+        if (el) {
+          el.style.position = 'fixed';
+          el.style.width = '1px';
+          el.style.height = '1px';
+          el.style.opacity = '0';
+          el.style.pointerEvents = 'none';
+          el.style.top = '0';
+          el.style.left = '0';
+        }
+      });
+    }, 500);
   }, []);
 
   const startGaze = useCallback(async () => {
@@ -1385,8 +1403,6 @@ function App() {
       // 저장된 포인트 재주입 (모델이 준비될 때까지 잠시 대기)
       setTimeout(() => {
         applyCalibPoints(saved.points, saved.screenW, saved.screenH);
-        window.webgazer?.showVideo(false);
-        window.webgazer?.showPredictionPoints(false);
         setGazeMode(true);
         setTimeout(updatePadRects, 150);
         showToast('✅ 캘리브레이션 불러왔습니다');
