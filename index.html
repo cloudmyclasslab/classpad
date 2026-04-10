@@ -89,20 +89,16 @@ function resizeImage(file, cb) {
   reader.readAsDataURL(file);
 }
 
-// ── Shared AudioContext (iOS unlock) ─────────────────────────
-let _sharedAudioCtx = null;
-function getAudioCtx() {
-  if (!_sharedAudioCtx) {
-    try { _sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
-  }
-  return _sharedAudioCtx;
-}
-function unlockAudio() {
-  const ctx = getAudioCtx();
-  if (ctx && ctx.state !== 'running') ctx.resume();
+// ── Components ────────────────────────────────────────────────
+// AudioContext - user gesture 시 iOS unlock 전용
+let _audioCtx = null;
+function resumeAudioCtx() {
+  try {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_audioCtx.state !== 'running') _audioCtx.resume().catch(() => {});
+  } catch {}
 }
 
-// ── Components ────────────────────────────────────────────────
 function PadVideo({ url, volume, onEnd, trimStart, trimEnd }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -112,13 +108,13 @@ function PadVideo({ url, volume, onEnd, trimStart, trimEnd }) {
     v.play().catch(console.error);
     v.ontimeupdate = () => { if (trimEnd && v.currentTime >= trimEnd) { v.pause(); onEnd(); } };
     v.onended = onEnd;
+    return () => { v.pause(); v.ontimeupdate = null; v.onended = null; };
   }, []);
   return <video ref={ref} src={url} playsInline style={{ position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',borderRadius:14,zIndex:1 }} />;
 }
 
 function PadAudio({ url, volume, onEnd }) {
   useEffect(() => {
-    unlockAudio();
     const a = new Audio(url);
     a.volume = Math.max(0, Math.min(1, volume));
     a.onended = onEnd;
@@ -143,7 +139,7 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
 
   const handleTap = (i) => {
     if (i !== cur) return;
-    unlockAudio(); // 탭 gesture로 AudioContext unlock
+    resumeAudioCtx();
     const x = window.innerWidth  * CALIB_GRID[i][0] / 100;
     const y = window.innerHeight * CALIB_GRID[i][1] / 100;
     for (let k = 0; k < CLICKS_PER_PT; k++) {
@@ -635,17 +631,27 @@ function ConfigPanel({ open, onClose, onSave, onLoad, onDeleteCfg }) {
   const handleSave = async () => {
     const name = nameInput.trim() || `구성 ${configs.length + 1}`;
     setSaving(true);
-    await onSave(name);
-    setName('');
-    await loadList();
-    setSaving(false);
+    try {
+      await onSave(name);
+      setName('');
+      await loadList();
+    } catch(e) {
+      console.error('구성 저장 오류:', e);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleLoad = async (cfg) => {
     setLoading(true);
-    await onLoad(cfg);
-    setLoading(false);
-    onClose();
+    try {
+      await onLoad(cfg);
+      onClose();
+    } catch(e) {
+      console.error('구성 불러오기 오류:', e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDelete = async (cfg) => {
@@ -1165,7 +1171,13 @@ function App() {
     const padMeta = padsRef.current.map(p => p ? { thumb:p.thumb, label:p.label, volume:p.volume, recType:p.recType, trimStart:p.trimStart, trimEnd:p.trimEnd } : null);
     // Save blobs under config namespace
     await Promise.all(padsRef.current.map(async (p, i) => {
-      if (p?.url) { const blob = await fetch(p.url).then(r=>r.blob()); await dbPut(`cfg_${id}_blob_${i}`, blob); }
+      if (p?.url) {
+        try {
+          // objectURL을 fetch하는 대신 IndexedDB에서 직접 읽기 (iOS fetch 오류 방지)
+          const blob = await dbGet(`blob_${i}`);
+          if (blob) await dbPut(`cfg_${id}_blob_${i}`, blob);
+        } catch(e) { console.error(`cfg blob ${i}:`, e); }
+      }
     }));
     const entry = { id, name, createdAt: Date.now(), cols, rows, padCount: padsRef.current.filter(Boolean).length, padMeta };
     const list = await dbGet('cfg_list') || [];
@@ -1423,10 +1435,10 @@ function App() {
           if (data.x >= r.left && data.x <= r.right && data.y >= r.top && data.y <= r.bottom) { hovIdx = i; break; }
         }
 
-        // 포인터를 패드 중앙으로 snap (캘리브 중이거나 패드 밖이면 숨김)
+        // 포인터를 패드 중앙으로 snap (캘리브 중이거나 녹음 모드거나 패드 밖이면 숨김)
         const dot = document.getElementById('gaze-dot');
         if (dot) {
-          if (hovIdx !== null && !gazeCalibRef.current) {
+          if (hovIdx !== null && !gazeCalibRef.current && modeRef.current === 'play') {
             const r = rects[hovIdx];
             dot.style.left = ((r.left + r.right) / 2) + 'px';
             dot.style.top  = ((r.top + r.bottom) / 2) + 'px';
@@ -1465,6 +1477,7 @@ function App() {
               resetArc(hovIdx);
               gh.lastPlayIdx = hovIdx;
               gh.idx = null; gh.timerId = null;
+              resumeAudioCtx();
               playPad(hovIdx);
             }, DWELL_MS);
           }
@@ -1670,6 +1683,7 @@ function App() {
   };
 
   const handlePadDown = (e, idx) => {
+    resumeAudioCtx(); // user gesture로 AudioContext unlock
     if (mode==='play') { playPad(idx); return; }
     if (recIdx !== null) return;
     const x0=e.clientX, y0=e.clientY;
@@ -1710,11 +1724,22 @@ function App() {
           <button onClick={()=>setShowHelp(true)} style={{ width:38,height:38,borderRadius:10,border:'1px solid #2a2a3e',background:'#1A1A2E',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>❓</button>
           <button onClick={()=>setShowSettings(true)} style={{ width:38,height:38,borderRadius:10,border:'1px solid #2a2a3e',background:'#1A1A2E',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>⚙️</button>
           <button onClick={gazeMode ? stopGaze : startGaze} style={{ width:38,height:38,borderRadius:10,border:`1px solid ${gazeMode?'#4CC9F0':'#2a2a3e'}`,background:gazeMode?'rgba(76,201,240,0.15)':'#1A1A2E',color:gazeMode?'#4CC9F0':'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',boxShadow:gazeMode?'0 0 12px rgba(76,201,240,0.3)':'none' }} title="시선 트래킹">👁️</button>
-          <button onClick={()=>setMode(m=>m==='play'?'record':'play')} style={{ height:38,padding:'0 14px',borderRadius:50,border:'none',background:mode==='record'?'linear-gradient(135deg,#FF4D6D,#FF6B35)':'linear-gradient(135deg,#06D6A0,#4CC9F0)',color:'#fff',fontWeight:700,fontSize:12,cursor:'pointer',boxShadow:mode==='record'?'0 0 16px rgba(255,77,109,0.5)':'0 0 16px rgba(6,214,160,0.4)' }}>
+          <button onClick={()=>{
+            if (gazeMode && mode==='play') showToast('👁️ 시선 트래킹이 일시 중지됩니다');
+            setMode(m=>m==='play'?'record':'play');
+          }} style={{ height:38,padding:'0 14px',borderRadius:50,border:'none',background:mode==='record'?'linear-gradient(135deg,#FF4D6D,#FF6B35)':'linear-gradient(135deg,#06D6A0,#4CC9F0)',color:'#fff',fontWeight:700,fontSize:12,cursor:'pointer',boxShadow:mode==='record'?'0 0 16px rgba(255,77,109,0.5)':'0 0 16px rgba(6,214,160,0.4)' }}>
             {mode==='record' ? (defaultRecType==='audio' ? '🎙 녹음' : '🔴 녹화') : '▶ 재생'}
           </button>
         </div>
       </div>
+
+      {/* 시선 트래킹 - 녹음/녹화 모드 안내 배너 */}
+      {gazeMode && mode==='record' && (
+        <div style={{ width:'100%',padding:'7px 14px',background:'rgba(255,107,53,0.15)',border:'1px solid rgba(255,107,53,0.35)',borderRadius:10,display:'flex',alignItems:'center',gap:8,flexShrink:0,marginBottom:4 }}>
+          <span style={{ fontSize:16 }}>⚠️</span>
+          <span style={{ color:'#FF6B35',fontSize:12,fontWeight:700 }}>시선 트래킹이 일시 중지되었습니다 — 재생 모드로 전환하면 다시 활성화됩니다</span>
+        </div>
+      )}
 
       {/* Grid */}
       <div style={{ display:'grid',gridTemplateColumns:`repeat(${cols},1fr)`,gap:GAP,width:gridWidth,flexShrink:0 }}>
