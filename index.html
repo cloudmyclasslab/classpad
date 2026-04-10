@@ -202,40 +202,44 @@ const DWELL_MS       = 1500;
 const CLICKS_PER_PT  = 5;
 const CALIB_HOLD_MS  = 2000;
 const CALIB_PAUSE_MS = 400;
-// 점진적 순서: 코너(4) → 중앙(1) → 엣지(4)
-const CALIB_GRID_ORDERED = [
-  [16.7,16.7],[83.3,16.7],[16.7,83.3],[83.3,83.3], // 코너
-  [50,50],                                           // 중앙
-  [50,16.7],[16.7,50],[83.3,50],[50,83.3],          // 엣지
+// 진행 순서: 모서리(4) → 중앙(1) → 엣지(4)
+const CALIB_ORDER = [
+  {x:16.7,y:16.7, cell:0}, // 좌상 모서리
+  {x:83.3,y:16.7, cell:2}, // 우상 모서리
+  {x:16.7,y:83.3, cell:6}, // 좌하 모서리
+  {x:83.3,y:83.3, cell:8}, // 우하 모서리
+  {x:50,  y:50,   cell:4}, // 중앙
+  {x:50,  y:16.7, cell:1}, // 상단 중앙
+  {x:16.7,y:50,   cell:3}, // 좌측 중앙
+  {x:83.3,y:50,   cell:5}, // 우측 중앙
+  {x:50,  y:83.3, cell:7}, // 하단 중앙
 ];
-const CALIB_VERIFY_POINT = [50,50]; // 검증 포인트
-const ACCURACY_THRESHOLD = 120;     // px - 이 이내면 "good"
+const ACCURACY_THRESHOLD = 120;
+const EMOJIS_BY_CELL = ['⭐','🌟','✨','🎯','🌈','🎪','💫','🔥','🎨'];
 
 function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
-  const [phase,    setPhase]    = React.useState('countdown'); // countdown|calibrating|verifying|done
+  const [phase,    setPhase]    = React.useState('countdown');
   const [cur,      setCur]      = React.useState(0);
-  const [maxPts,   setMaxPts]   = React.useState(5); // 5(코너+중앙) or 9(전체)
+  const [maxPts,   setMaxPts]   = React.useState(5);
   const [ready,    setReady]    = React.useState(3);
   const [progress, setProgress] = React.useState(0);
-  const [accuracy, setAccuracy] = React.useState(null); // px error or null
-  const timerRef  = React.useRef(null);
-  const rafRef    = React.useRef(null);
-  const startRef  = React.useRef(null);
-  const preds     = React.useRef([]);
+  const [accuracy, setAccuracy] = React.useState(null);
+  const timerRef = React.useRef(null);
+  const rafRef   = React.useRef(null);
+  const startRef = React.useRef(null);
+  const preds    = React.useRef([]);
 
-  // 패드 기록
   const recordPad = React.useCallback((i) => {
     unlockAudioPool();
-    const pt = CALIB_GRID_ORDERED[i];
-    const x = window.innerWidth  * pt[0] / 100;
-    const y = window.innerHeight * pt[1] / 100;
+    const pt = CALIB_ORDER[i];
+    const x = window.innerWidth  * pt.x / 100;
+    const y = window.innerHeight * pt.y / 100;
     for (let k = 0; k < CLICKS_PER_PT; k++) {
       try { window.webgazer?.recordScreenPosition(x, y, 'click'); } catch {}
     }
     onCalibClick?.(x, y);
   }, [onCalibClick]);
 
-  // 패드 진행 애니메이션
   const startPad = React.useCallback((i) => {
     setProgress(0);
     startRef.current = performance.now();
@@ -251,8 +255,7 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
       setTimeout(() => {
         const next = i + 1;
         if (next >= maxPts) {
-          // 5포인트 완료 → 정확도 검증
-          setPhase('verifying');
+          setPhase('verifying'); // 검증으로
         } else {
           setCur(next);
         }
@@ -260,67 +263,69 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
     }, CALIB_HOLD_MS);
   }, [recordPad, maxPts]);
 
-  // 정확도 검증: 1초간 예측 수집
   const runVerify = React.useCallback(() => {
     preds.current = [];
     const collect = setInterval(() => {
       try {
-        window.webgazer?.getCurrentPrediction().then(p => {
-          if (p) preds.current.push({x: p.x, y: p.y});
-        });
+        const p = window.webgazer?.getCurrentPrediction?.();
+        if (p && p.then) p.then(r => { if (r) preds.current.push({x:r.x, y:r.y}); });
       } catch {}
-    }, 100);
+    }, 120);
     setTimeout(() => {
       clearInterval(collect);
-      if (preds.current.length === 0) {
-        // 예측 없음 → 전체 캘리브 진행
-        setMaxPts(9); setCur(5); setPhase('calibrating');
-        return;
+      if (preds.current.length === 0 || maxPts >= 9) {
+        // 예측 없거나 이미 전체 캘리브 완료 → 무조건 종료
+        onDone(); return;
       }
       const mx = preds.current.reduce((s,p)=>s+p.x,0)/preds.current.length;
       const my = preds.current.reduce((s,p)=>s+p.y,0)/preds.current.length;
-      const ex = window.innerWidth  * CALIB_VERIFY_POINT[0] / 100;
-      const ey = window.innerHeight * CALIB_VERIFY_POINT[1] / 100;
-      const err = Math.round(Math.hypot(mx - ex, my - ey));
+      const ex = window.innerWidth  * 50 / 100;
+      const ey = window.innerHeight * 50 / 100;
+      const err = Math.round(Math.hypot(mx-ex, my-ey));
       setAccuracy(err);
-      if (err <= ACCURACY_THRESHOLD) {
-        // 충분히 정확 → 완료
-        setTimeout(onDone, 1200);
-      } else {
-        // 부족 → 엣지 포인트 추가 캘리브
-        setTimeout(() => { setMaxPts(9); setCur(5); setPhase('calibrating'); }, 1200);
-      }
-    }, 1200);
-  }, [onDone]);
+      setTimeout(() => {
+        if (err <= ACCURACY_THRESHOLD || maxPts >= 9) {
+          onDone(); // 정확 or 이미 전체 완료 → 종료
+        } else {
+          setMaxPts(9); setCur(5); setPhase('calibrating'); // 엣지 추가
+        }
+      }, 1200);
+    }, 1500);
+  }, [onDone, maxPts]);
 
-  // 3·2·1 카운트다운
+  // 카운트다운
   React.useEffect(() => {
     if (phase !== 'countdown') return;
     if (ready > 0) {
       const t = setTimeout(() => setReady(r => r - 1), 1000);
       return () => clearTimeout(t);
-    } else {
-      setPhase('calibrating');
-    }
+    } else { setPhase('calibrating'); }
   }, [ready, phase]);
 
-  // 캘리브레이션 진행
+  // 패드 진행
   React.useEffect(() => {
     if (phase !== 'calibrating') return;
     startPad(cur);
     return () => { clearTimeout(timerRef.current); cancelAnimationFrame(rafRef.current); };
   }, [cur, phase]);
 
-  // 검증 시작
+  // 검증
   React.useEffect(() => {
     if (phase !== 'verifying') return;
     runVerify();
   }, [phase]);
 
-  const emojis = ['⭐','🌟','✨','🎯','🌈','🎪','💫','🔥','🎨'];
-  const totalPts = CALIB_GRID_ORDERED.length;
   const R = 36, C = 2 * Math.PI * R;
   const dash = C * (1 - progress);
+
+  // cell → 현재 상태 매핑
+  const cellState = {};
+  CALIB_ORDER.forEach((pt, i) => {
+    if (i < cur) cellState[pt.cell] = 'done';
+    else if (i === cur && phase === 'calibrating') cellState[pt.cell] = 'active';
+    else if (i < maxPts) cellState[pt.cell] = 'pending';
+    else cellState[pt.cell] = 'future';
+  });
 
   return (
     <div style={{position:'fixed',inset:0,background:'#000',zIndex:800,display:'flex',flexDirection:'column',touchAction:'none'}}>
@@ -330,16 +335,16 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
           {phase==='verifying' ? '🔍 정확도 확인 중...' : '👁️ 시선 캘리브레이션'}
         </div>
         <div style={{color:'#aaa',fontSize:13,marginTop:4}}>
-          {phase==='countdown' && '준비하세요 — 자동으로 시작됩니다'}
+          {phase==='countdown' && '준비하세요 — 곧 자동으로 시작됩니다'}
           {phase==='calibrating' && <>
-            <span style={{color:'#FFD60A',fontWeight:700}}>빛나는 패드</span>를 바라보세요 &nbsp;
-            <span style={{color:'#555'}}>({cur+1} / {maxPts})</span>
+            <span style={{color:'#FFD60A',fontWeight:700}}>빛나는 패드</span>를 바라보세요
+            <span style={{color:'#555'}}> ({cur+1} / {maxPts})</span>
           </>}
           {phase==='verifying' && (accuracy === null
             ? '화면 중앙을 바라봐 주세요'
             : accuracy <= ACCURACY_THRESHOLD
               ? <span style={{color:'#06D6A0',fontWeight:700}}>✓ 정확도 양호 ({accuracy}px)</span>
-              : <span style={{color:'#FFB703',fontWeight:700}}>추가 보정이 필요합니다 ({accuracy}px)</span>
+              : <span style={{color:'#FFB703',fontWeight:700}}>추가 보정 진행 중 ({accuracy}px)</span>
           )}
         </div>
         <div style={{display:'flex',gap:12,justifyContent:'center',marginTop:8,flexWrap:'wrap'}}>
@@ -347,14 +352,8 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
           <span style={{color:'#4CC9F0',fontSize:11}}>💡 정면 조명</span>
           <span style={{color:'#4CC9F0',fontSize:11}}>🪑 고정된 자세</span>
         </div>
-        {/* 전체 진행 바 */}
         <div style={{width:200,height:4,background:'#1a1a2e',borderRadius:2,margin:'8px auto 0',overflow:'hidden'}}>
-          <div style={{
-            width:`${phase==='verifying' ? 95 : cur/totalPts*100}%`,
-            height:'100%',
-            background:'linear-gradient(90deg,#FFD60A,#FF6B35)',
-            borderRadius:2,transition:'width 0.3s'
-          }} />
+          <div style={{width:`${phase==='verifying'?95:cur/CALIB_ORDER.length*100}%`,height:'100%',background:'linear-gradient(90deg,#FFD60A,#FF6B35)',borderRadius:2,transition:'width 0.3s'}} />
         </div>
       </div>
 
@@ -365,42 +364,31 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
         </div>
       )}
 
-      {/* 검증 화면 - 중앙 포인트 */}
+      {/* 검증 화면 */}
       {phase==='verifying' && (
         <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center'}}>
-          <div style={{
-            width:80,height:80,borderRadius:'50%',
-            background:'rgba(76,201,240,0.2)',border:'3px solid #4CC9F0',
-            display:'flex',alignItems:'center',justifyContent:'center',
-            boxShadow:'0 0 40px rgba(76,201,240,0.6)',
-            animation:'pulse 0.8s ease-in-out infinite',
-          }}>
+          <div style={{width:80,height:80,borderRadius:'50%',background:'rgba(76,201,240,0.2)',border:'3px solid #4CC9F0',display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 0 40px rgba(76,201,240,0.6)',animation:'pulse 0.8s ease-in-out infinite'}}>
             <div style={{width:16,height:16,borderRadius:'50%',background:'#4CC9F0'}} />
           </div>
         </div>
       )}
 
-      {/* 3×3 그리드 (캘리브 중) */}
-      {phase==='calibrating' && (
+      {/* 3×3 그리드 - 실제 화면 위치 반영 */}
+      {(phase==='calibrating' || phase==='countdown') && (
         <div style={{flex:1,display:'grid',gridTemplateColumns:'repeat(3,1fr)',gridTemplateRows:'repeat(3,1fr)',gap:8,padding:8}}>
-          {CALIB_GRID_ORDERED.map((_, i) => {
-            const isActive = phase==='calibrating' && i === cur;
-            const isDone   = i < cur || (phase==='verifying' && i < maxPts);
-            const isExtra  = i >= 5; // 엣지 포인트
-            if (i >= maxPts && !isActive) {
-              // 아직 진행 안 한 엣지는 희미하게
-              return <div key={i} style={{borderRadius:20,background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.04)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                <span style={{fontSize:20,opacity:0.06}}>{emojis[i]}</span>
-              </div>;
-            }
+          {Array.from({length:9}, (_,cell) => {
+            const st = cellState[cell] || 'future';
+            const isActive = st === 'active';
+            const isDone   = st === 'done';
+            const isFuture = st === 'future';
             return (
-              <div key={i} style={{
+              <div key={cell} style={{
                 borderRadius:20,
-                background: isDone ? 'rgba(0,0,0,0.75)' : isActive ? 'rgba(255,214,10,0.18)' : 'rgba(255,255,255,0.03)',
-                border: isDone ? '1.5px solid rgba(255,255,255,0.08)' : isActive ? '3px solid #FFD60A' : `2px solid ${isExtra?'rgba(255,107,53,0.2)':'rgba(255,255,255,0.06)'}`,
+                background: isDone?'rgba(0,0,0,0.75)': isActive?'rgba(255,214,10,0.18)':'rgba(255,255,255,0.03)',
+                border: isDone?'1.5px solid rgba(255,255,255,0.08)': isActive?'3px solid #FFD60A':`2px solid rgba(255,255,255,${isFuture?'0.03':'0.06'})`,
                 display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,
                 position:'relative',overflow:'hidden',
-                boxShadow: isActive ? '0 0 48px rgba(255,214,10,0.7),inset 0 0 30px rgba(255,214,10,0.12)' : 'none',
+                boxShadow: isActive?'0 0 48px rgba(255,214,10,0.7),inset 0 0 30px rgba(255,214,10,0.12)':'none',
                 transition:'background 0.25s,border 0.25s,box-shadow 0.25s',
               }}>
                 {isDone ? (
@@ -414,11 +402,11 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
                         transform="rotate(-90 50 50)" style={{transition:'stroke-dasharray 0.05s linear'}}/>
                     </svg>
                     <span style={{fontSize:52,lineHeight:1,filter:'drop-shadow(0 0 12px rgba(255,214,10,0.9))',animation:'pulse 0.7s ease-in-out infinite',position:'relative',zIndex:1}}>
-                      {emojis[i]}
+                      {EMOJIS_BY_CELL[cell]}
                     </span>
                   </>
                 ) : (
-                  <span style={{fontSize:30,opacity:isExtra?0.06:0.12}}>{emojis[i]}</span>
+                  <span style={{fontSize:30,opacity:isFuture?0.04:0.12}}>{EMOJIS_BY_CELL[cell]}</span>
                 )}
               </div>
             );
@@ -430,8 +418,6 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
     </div>
   );
 }
-
-// ── GazeLoadingScreen ─────────────────────────────────────────
 function GazeLoadingScreen({ onCancel }) {
   const [dots, setDots] = React.useState('');
   React.useEffect(() => {
