@@ -1171,6 +1171,7 @@ function App() {
   const [recIdx,       setRecIdx]       = useState(null);
   const [countdown,    setCountdown]    = useState(null);
   const [playKeys,     setPlayKeys]     = useState({});
+  const playKeysRef    = useRef({});
   const [camReady,     setCamReady]     = useState(false);
   const [recProg,      setRecProg]      = useState(0);
   const [gridWidth,    setGridWidth]    = useState(300);
@@ -1249,8 +1250,32 @@ function App() {
   useEffect(() => { defRecTypeRef.current = defaultRecType; },[defaultRecType]);
   useEffect(() => { gazeModeRef.current = gazeMode; }, [gazeMode]);
   useEffect(() => { gazeCalibRef.current = gazeCalib; }, [gazeCalib]);
-  useEffect(() => { modeRef.current = mode; }, [mode]);
+  useEffect(() => { playKeysRef.current = playKeys; }, [playKeys]);
   useEffect(() => { nystagmusModeRef.current = nystagmusMode; }, [nystagmusMode]);
+
+  // ── 화면 잠금 해제 후 WebGazer 복구 ─────────────────────────
+  useEffect(() => {
+    const handle = () => {
+      if (document.visibilityState !== 'visible' || !gazeModeRef.current) return;
+      setTimeout(() => {
+        try {
+          const paused = window.webgazer?.params?.paused;
+          if (paused) {
+            window.webgazer.resume();
+            hideWebgazerEls();
+            updatePadRects();
+          }
+        } catch {
+          // 복구 실패 시 안내
+          showToast('👁️ 화면이 재개되었습니다. 시선 트래킹을 다시 시작해 주세요');
+          setGazeMode(false);
+          gazeModeRef.current = false;
+        }
+      }, 800);
+    };
+    document.addEventListener('visibilitychange', handle);
+    return () => document.removeEventListener('visibilitychange', handle);
+  }, []);
 
   // ── Save ─────────────────────────────────────────────────────
   const performSave = async curPads => {
@@ -1589,6 +1614,8 @@ function App() {
   const stopGaze = useCallback(() => {
     try { window.webgazer?.pause(); } catch {}
     try { window.webgazer?.clearData(); } catch {}
+    // end()로 완전 정리 - 재시작 시 begin() 재사용 가능
+    try { window.webgazer?.end(); } catch {}
     gazeObsRef.current?.disconnect();
     const dot = document.getElementById('gaze-dot');
     if (dot) dot.style.display = 'none';
@@ -1723,16 +1750,27 @@ function App() {
           showToast('👁️ 캘리브레이션을 다시 하면 정확도가 올라갑니다');
         }
 
-        // ── 패드 감지 ─────────────────────────────────────
+        // ── 패드 감지 - 가장 가까운 패드 중심 선택 ──────────
         const rects = padRectsRef.current;
         const nys = nystagmusModeRef.current;
-        const PAD_MARGIN = nys ? 40 : 20;
         let hovIdx = null;
+        let minDist = Infinity;
         for (let i = 0; i < rects.length; i++) {
           const r = rects[i];
           if (!r) continue;
+          // 재생 중인 패드는 dwell 대상에서 제외
+          if (playKeysRef.current[i]) continue;
+          const padW = r.right - r.left;
+          const padH = r.bottom - r.top;
+          const PAD_MARGIN = Math.round(Math.min(padW, padH) * (nys ? 0.25 : 0.15));
           if (data.x >= r.left-PAD_MARGIN && data.x <= r.right+PAD_MARGIN &&
-              data.y >= r.top-PAD_MARGIN  && data.y <= r.bottom+PAD_MARGIN) { hovIdx = i; break; }
+              data.y >= r.top-PAD_MARGIN  && data.y <= r.bottom+PAD_MARGIN) {
+            // 겹침 시 중심 거리가 가장 가까운 패드 선택
+            const cx = (r.left + r.right) / 2;
+            const cy = (r.top  + r.bottom) / 2;
+            const dist = Math.hypot(data.x - cx, data.y - cy);
+            if (dist < minDist) { minDist = dist; hovIdx = i; }
+          }
         }
 
         // ── Quick Recalibration (코너 3초 응시) ───────────
