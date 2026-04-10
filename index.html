@@ -1586,11 +1586,6 @@ function App() {
   }, []);
   const stopPad = useCallback(idx => {
     setPlayKeys(k => { const n={...k}; delete n[idx]; return n; });
-    // 재생 종료 후 1.5초 뒤 쿨다운 해제 → 자동 반복 방지 + 학생 재선택 가능
-    setTimeout(() => {
-      const gh = gazeHoverRef.current;
-      if (gh.lastPlayIdx === idx) gh.lastPlayIdx = null;
-    }, 1500);
   }, []);
 
   // ── Auto Gaze Correction ─────────────────────────────────────
@@ -1822,19 +1817,23 @@ function App() {
             }
             gh.timerId = setTimeout(()=>{
               resetArc(effectiveIdx);
-              // 시선이 이미 다른 패드로 이동했으면 재생 취소
-              if (gazeHoverRef.current.idx !== null && gazeHoverRef.current.idx !== effectiveIdx) return;
               const padEl=document.querySelector(`[data-pi="${effectiveIdx}"]`);
               if (padEl) { padEl.style.filter='brightness(2.2)'; setTimeout(()=>{padEl.style.filter='';},180); }
               gh.lastPlayIdx=effectiveIdx; gh.idx=null; gh.timerId=null; gh.exitCount=0;
               unlockAudioPool(); resumeAudioCtx();
               playPad(effectiveIdx);
+              // 재생 시작 시점에 쿨다운 타이머 시작 (재생 중 카운트)
+              setTimeout(() => {
+                const gh2 = gazeHoverRef.current;
+                if (gh2.lastPlayIdx === effectiveIdx) gh2.lastPlayIdx = null;
+              }, 1500);
             }, dwell);
           }
         }
       });
     if (!gazeInitRef.current) {
-      // 첫 실행: begin()
+      // 첫 실행: 세션 간 모델 저장 활성화 후 begin()
+      try { window.webgazer.saveDataAcrossSessions(true); } catch {}
       await window.webgazer.begin();
       gazeInitRef.current = true;
     } else {
