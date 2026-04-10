@@ -199,19 +199,25 @@ function PadAudio({ url, volume, onEnd }) {
 
 // ── Gaze Calibration ──────────────────────────────────────────
 const DWELL_MS = 1500;
-// 3×3 그리드 중앙 퍼센트 좌표
 const CALIB_GRID = [
   [16.7,16.7],[50,16.7],[83.3,16.7],
   [16.7,50  ],[50,50  ],[83.3,50  ],
   [16.7,83.3],[50,83.3],[83.3,83.3],
 ];
-const CLICKS_PER_PT = 5; // 포인트당 5회 기록 (정확도 향상)
+const CLICKS_PER_PT  = 5;
+const CALIB_HOLD_MS  = 2000; // 각 패드 자동 인식 시간 (ms)
+const CALIB_PAUSE_MS = 400;  // 패드 간 전환 대기
 
 function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
-  const [cur, setCur] = React.useState(0);
+  const [cur,      setCur]      = React.useState(-1); // -1 = 준비 카운트다운
+  const [ready,    setReady]    = React.useState(3);  // 3·2·1 카운트다운
+  const [progress, setProgress] = React.useState(0);  // 0~1 진행률
+  const timerRef   = React.useRef(null);
+  const rafRef     = React.useRef(null);
+  const startRef   = React.useRef(null);
 
-  const handleTap = (i) => {
-    if (i !== cur) return;
+  // 패드 기록 함수
+  const recordPad = React.useCallback((i) => {
     unlockAudioPool();
     const x = window.innerWidth  * CALIB_GRID[i][0] / 100;
     const y = window.innerHeight * CALIB_GRID[i][1] / 100;
@@ -219,66 +225,116 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
       try { window.webgazer?.recordScreenPosition(x, y, 'click'); } catch {}
     }
     onCalibClick?.(x, y);
-    if (i + 1 >= CALIB_GRID.length) { onDone(); }
-    else { setCur(i + 1); }
-  };
+  }, [onCalibClick]);
+
+  // 패드 진행 애니메이션
+  const startPad = React.useCallback((i) => {
+    setProgress(0);
+    startRef.current = performance.now();
+    const animate = (now) => {
+      const elapsed = now - startRef.current;
+      setProgress(Math.min(elapsed / CALIB_HOLD_MS, 1));
+      if (elapsed < CALIB_HOLD_MS) {
+        rafRef.current = requestAnimationFrame(animate);
+      }
+    };
+    rafRef.current = requestAnimationFrame(animate);
+    timerRef.current = setTimeout(() => {
+      cancelAnimationFrame(rafRef.current);
+      recordPad(i);
+      setProgress(1);
+      setTimeout(() => {
+        if (i + 1 >= CALIB_GRID.length) { onDone(); }
+        else { setCur(i + 1); }
+      }, CALIB_PAUSE_MS);
+    }, CALIB_HOLD_MS);
+  }, [recordPad, onDone]);
+
+  // 3·2·1 카운트다운 후 시작
+  React.useEffect(() => {
+    if (ready > 0) {
+      const t = setTimeout(() => setReady(r => r - 1), 1000);
+      return () => clearTimeout(t);
+    } else {
+      setCur(0);
+    }
+  }, [ready]);
+
+  // 새 패드가 활성화될 때 타이머 시작
+  React.useEffect(() => {
+    if (cur < 0) return;
+    startPad(cur);
+    return () => { clearTimeout(timerRef.current); cancelAnimationFrame(rafRef.current); };
+  }, [cur]);
 
   const emojis = ['⭐','🌟','✨','🎯','🌈','🎪','💫','🔥','🎨'];
 
+  // 원형 SVG 진행 게이지 (수축 방향)
+  const R = 36, C = 2 * Math.PI * R;
+  const dash = C * (1 - progress);
+
   return (
     <div style={{position:'fixed',inset:0,background:'#000',zIndex:800,display:'flex',flexDirection:'column',touchAction:'none'}}>
+      {/* 헤더 */}
       <div style={{textAlign:'center',padding:'16px 0 8px',flexShrink:0}}>
         <div style={{color:'#fff',fontWeight:800,fontSize:18}}>👁️ 시선 캘리브레이션</div>
-        <div style={{color:'#aaa',fontSize:13,marginTop:4}}>
-          <span style={{color:'#FFD60A',fontWeight:700}}>빛나는 패드</span>를 바라보면서 탭하세요 &nbsp;
-          <span style={{color:'#555'}}>({cur+1} / {CALIB_GRID.length})</span>
-        </div>
+        {ready > 0 ? (
+          <div style={{color:'#aaa',fontSize:13,marginTop:4}}>준비하세요 — 자동으로 시작됩니다</div>
+        ) : (
+          <div style={{color:'#aaa',fontSize:13,marginTop:4}}>
+            <span style={{color:'#FFD60A',fontWeight:700}}>빛나는 패드</span>를 바라보세요 &nbsp;
+            <span style={{color:'#555'}}>({Math.max(cur,0)+1} / {CALIB_GRID.length})</span>
+          </div>
+        )}
         <div style={{display:'flex',gap:12,justifyContent:'center',marginTop:8,flexWrap:'wrap'}}>
-          <span style={{color:'#4CC9F0',fontSize:11}}>📏 화면에서 40~60cm 거리</span>
+          <span style={{color:'#4CC9F0',fontSize:11}}>📏 40~60cm 거리</span>
           <span style={{color:'#4CC9F0',fontSize:11}}>💡 정면 조명</span>
-          <span style={{color:'#4CC9F0',fontSize:11}}>🪑 흔들리지 않는 자세</span>
+          <span style={{color:'#4CC9F0',fontSize:11}}>🪑 고정된 자세</span>
         </div>
         <div style={{width:200,height:4,background:'#1a1a2e',borderRadius:2,margin:'8px auto 0',overflow:'hidden'}}>
-          <div style={{width:`${cur/CALIB_GRID.length*100}%`,height:'100%',background:'linear-gradient(90deg,#FFD60A,#FF6B35)',borderRadius:2,transition:'width 0.3s'}} />
+          <div style={{width:`${Math.max(cur,0)/CALIB_GRID.length*100}%`,height:'100%',background:'linear-gradient(90deg,#FFD60A,#FF6B35)',borderRadius:2,transition:'width 0.3s'}} />
         </div>
       </div>
 
+      {/* 준비 카운트다운 오버레이 */}
+      {ready > 0 && (
+        <div style={{position:'absolute',inset:0,zIndex:10,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.6)'}}>
+          <div key={ready} style={{fontSize:96,fontWeight:900,color:'#FFD60A',textShadow:'0 0 40px rgba(255,214,10,0.8)',animation:'countPop 0.7s ease-out forwards'}}>{ready}</div>
+        </div>
+      )}
+
+      {/* 3×3 그리드 */}
       <div style={{flex:1,display:'grid',gridTemplateColumns:'repeat(3,1fr)',gridTemplateRows:'repeat(3,1fr)',gap:8,padding:8}}>
         {CALIB_GRID.map((_, i) => {
           const isActive = i === cur;
           const isDone   = i < cur;
           return (
-            <div
-              key={i}
-              onPointerDown={() => handleTap(i)}
-              style={{
-                borderRadius:20,
-                background: isDone
-                  ? 'rgba(0,0,0,0.75)'
-                  : isActive
-                    ? 'rgba(255,214,10,0.18)'
-                    : 'rgba(255,255,255,0.03)',
-                border: isDone
-                  ? '1.5px solid rgba(255,255,255,0.08)'
-                  : isActive
-                    ? '3px solid #FFD60A'
-                    : '2px solid rgba(255,255,255,0.06)',
-                display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,
-                cursor: isActive ? 'pointer' : 'default',
-                boxShadow: isActive
-                  ? '0 0 48px rgba(255,214,10,0.7), inset 0 0 30px rgba(255,214,10,0.12)'
-                  : 'none',
-                transition:'all 0.25s',
-              }}
-            >
+            <div key={i} style={{
+              borderRadius:20,
+              background: isDone ? 'rgba(0,0,0,0.75)' : isActive ? 'rgba(255,214,10,0.18)' : 'rgba(255,255,255,0.03)',
+              border: isDone ? '1.5px solid rgba(255,255,255,0.08)' : isActive ? '3px solid #FFD60A' : '2px solid rgba(255,255,255,0.06)',
+              display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:4,
+              position:'relative', overflow:'hidden',
+              boxShadow: isActive ? '0 0 48px rgba(255,214,10,0.7), inset 0 0 30px rgba(255,214,10,0.12)' : 'none',
+              transition:'background 0.25s, border 0.25s, box-shadow 0.25s',
+            }}>
               {isDone ? (
                 <span style={{fontSize:24,opacity:0.35}}>✓</span>
               ) : isActive ? (
                 <>
-                  <span style={{fontSize:58,lineHeight:1,filter:'drop-shadow(0 0 12px rgba(255,214,10,0.9))',animation:'pulse 0.7s ease-in-out infinite'}}>
+                  {/* 원형 카운트다운 게이지 */}
+                  <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none'}} viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r={R} fill="none" stroke="rgba(255,214,10,0.15)" strokeWidth="6"/>
+                    <circle cx="50" cy="50" r={R} fill="none" stroke="#FFD60A" strokeWidth="6"
+                      strokeDasharray={`${C - dash} ${dash}`}
+                      strokeLinecap="round"
+                      transform="rotate(-90 50 50)"
+                      style={{transition:'stroke-dasharray 0.05s linear'}}
+                    />
+                  </svg>
+                  <span style={{fontSize:52,lineHeight:1,filter:'drop-shadow(0 0 12px rgba(255,214,10,0.9))',animation:'pulse 0.7s ease-in-out infinite',position:'relative',zIndex:1}}>
                     {emojis[i]}
                   </span>
-                  <span style={{fontSize:13,color:'#FFD60A',fontWeight:800,letterSpacing:1,marginTop:2}}>탭!</span>
                 </>
               ) : (
                 <span style={{fontSize:30,opacity:0.12}}>{emojis[i]}</span>
