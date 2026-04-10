@@ -1435,10 +1435,11 @@ function App() {
           if (data.x >= r.left && data.x <= r.right && data.y >= r.top && data.y <= r.bottom) { hovIdx = i; break; }
         }
 
-        // 포인터를 패드 중앙으로 snap (캘리브 중이거나 녹음 모드거나 패드 밖이면 숨김)
+        // dot: dwell이 진행 중인 패드 중앙에만 표시
         const dot = document.getElementById('gaze-dot');
         if (dot) {
-          if (hovIdx !== null && !gazeCalibRef.current && modeRef.current === 'play') {
+          const gh0 = gazeHoverRef.current;
+          if (hovIdx !== null && gh0.timerId !== null && !gazeCalibRef.current && modeRef.current === 'play') {
             const r = rects[hovIdx];
             dot.style.left = ((r.left + r.right) / 2) + 'px';
             dot.style.top  = ((r.top + r.bottom) / 2) + 'px';
@@ -1460,9 +1461,9 @@ function App() {
         if (hovIdx !== gh.idx) {
           if (gh.idx !== null) resetArc(gh.idx);
           clearTimeout(gh.timerId);
-          // 패드 밖으로 나가거나 다른 패드를 보면 쿨다운 해제
-          if (hovIdx === null || hovIdx !== gh.lastPlayIdx) gh.lastPlayIdx = null;
-          const blocked = false; // 패드 밖 → 다시 들어오면 항상 허용
+          // 패드 밖으로 나가면 쿨다운 해제 → 같은 패드 재선택 가능
+          if (hovIdx === null) gh.lastPlayIdx = null;
+          const blocked = (hovIdx !== null && hovIdx === gh.lastPlayIdx);
           gh.idx = hovIdx; gh.timerId = null;
           if (hovIdx !== null && !blocked) {
             const arc = document.getElementById(`dwell-arc-${hovIdx}`);
