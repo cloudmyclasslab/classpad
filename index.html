@@ -1312,7 +1312,9 @@ function App() {
 
   const handleGazeCalibDone = useCallback(async () => {
     setGazeCalib(false);
+    gazeCalibRef.current = false;
     setGazeMode(true);
+    gazeModeRef.current = true; // 즉시 반영 (setState는 비동기)
     // 캘리브레이션 포인트 DB 저장
     try {
       await dbPut('gaze_calibration', {
@@ -1371,10 +1373,10 @@ function App() {
           if (data.x >= r.left && data.x <= r.right && data.y >= r.top && data.y <= r.bottom) { hovIdx = i; break; }
         }
 
-        // 포인터를 패드 중앙으로 snap (패드 밖이면 숨김)
+        // 포인터를 패드 중앙으로 snap (캘리브 중이거나 패드 밖이면 숨김)
         const dot = document.getElementById('gaze-dot');
         if (dot) {
-          if (hovIdx !== null) {
+          if (hovIdx !== null && !gazeCalibRef.current) {
             const r = rects[hovIdx];
             dot.style.left = ((r.left + r.right) / 2) + 'px';
             dot.style.top  = ((r.top + r.bottom) / 2) + 'px';
@@ -1457,6 +1459,7 @@ function App() {
         setTimeout(() => {
           applyCalibPoints(saved.points, saved.screenW, saved.screenH);
           setGazeMode(true);
+          gazeModeRef.current = true;
           setTimeout(updatePadRects, 150);
           showToast('✅ 캘리브레이션 불러왔습니다');
         }, 800);
