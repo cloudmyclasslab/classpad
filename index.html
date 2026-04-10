@@ -1760,12 +1760,17 @@ function App() {
           } else { cr.corner=null; cr.since=null; cr.notified=false; }
         }
 
-        // 안정화 필터 (4프레임)
+        // 안정화 필터
         const stable = gazeStableRef.current;
+        if (hovIdx === stable.idx) stable.count = Math.min(stable.count + 1, 99);
+        else { stable.idx = hovIdx; stable.count = 1; }
+
+        // 패드→다른패드: 2프레임(빠른 전환)
+        // null→패드 or 패드→null: 4프레임(노이즈 방지)
         const STABLE = nys ? 6 : 4;
-        if (hovIdx===stable.idx) stable.count=Math.min(stable.count+1,99);
-        else { stable.idx=hovIdx; stable.count=1; }
-        const stableIdx = stable.count>=STABLE ? hovIdx : gazeHoverRef.current.idx;
+        const switchingPads = hovIdx !== null && gazeHoverRef.current.idx !== null && hovIdx !== gazeHoverRef.current.idx;
+        const threshold = switchingPads ? 2 : STABLE;
+        const stableIdx = stable.count >= threshold ? hovIdx : gazeHoverRef.current.idx;
 
         // dot 표시
         const dot = document.getElementById('gaze-dot');
@@ -1813,6 +1818,8 @@ function App() {
             }
             gh.timerId = setTimeout(()=>{
               resetArc(effectiveIdx);
+              // 시선이 이미 다른 패드로 이동했으면 재생 취소
+              if (gazeHoverRef.current.idx !== null && gazeHoverRef.current.idx !== effectiveIdx) return;
               const padEl=document.querySelector(`[data-pi="${effectiveIdx}"]`);
               if (padEl) { padEl.style.filter='brightness(2.2)'; setTimeout(()=>{padEl.style.filter='';},180); }
               gh.lastPlayIdx=effectiveIdx; gh.idx=null; gh.timerId=null; gh.exitCount=0;
