@@ -855,7 +855,7 @@ function Settings({ open, onClose, cfg, set, onReset }) {
   const hMove = e => { if(!dg.current.on) return; const y=Math.max(0,(e.clientY||e.touches?.[0]?.clientY||0)-dg.current.y0); dg.current.dy=y; setTy(y); };
   const hUp   = () => { if(!dg.current.on) return; dg.current.on=false; if(dg.current.dy>120){onClose();setTy(0);}else setTy(0); };
   if (!open) return null;
-  const { cols, rows, maxRecMs, globalVolume, cameraFacing, defaultRecType } = cfg;
+  const { cols, rows, maxRecMs, globalVolume, cameraFacing, defaultRecType, dwellMs } = cfg;
   const sBtn = a => ({ flex:1,padding:'8px 0',borderRadius:8,border:'none',cursor:'pointer',fontWeight:700,fontSize:12,background:a?'#4CC9F0':'#1A1A2E',color:a?'#000':'#555' });
   const stBtn = d => ({ width:36,height:36,borderRadius:8,border:'1px solid #2a2a3e',background:'#1A1A2E',color:d?'#333':'#fff',fontSize:20,cursor:d?'default':'pointer',display:'flex',alignItems:'center',justifyContent:'center' });
   const sec = { color:'#666',fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:10 };
@@ -918,21 +918,16 @@ function Settings({ open, onClose, cfg, set, onReset }) {
         </div>
       </div>
 
-      {/* 전체 볼륨 */}
-      <div style={{ marginBottom:24 }}>
-        <div style={{ display:'flex',justifyContent:'space-between',marginBottom:10 }}>
-          <span style={sec}>전체 볼륨</span>
-          <span style={{ color:'#4CC9F0',fontSize:12,fontWeight:700 }}>{Math.round(globalVolume*100)}%</span>
-        </div>
-        <input type="range" min={0} max={1} step={0.05} value={globalVolume} onChange={e=>set('globalVolume',+e.target.value)} />
-      </div>
-
-      {/* 카메라 (영상 모드일 때만 관련) */}
+      {/* 시선 응시 시간 */}
       <div style={{ marginBottom:32 }}>
-        <div style={sec}>카메라 방향</div>
+        <div style={sec}>👁️ 시선 응시 시간 (Dwell)</div>
         <div style={{ display:'flex',gap:8 }}>
-          <button style={sBtn(cameraFacing==='user')}        onClick={()=>set('cameraFacing','user')}>📱 전면</button>
-          <button style={sBtn(cameraFacing==='environment')} onClick={()=>set('cameraFacing','environment')}>📷 후면</button>
+          {[500,800,1000,1500].map(ms=>(
+            <button key={ms} style={sBtn(dwellMs===ms)} onClick={()=>set('dwellMs',ms)}>{ms<1000?ms+'ms':ms/1000+'초'}</button>
+          ))}
+        </div>
+        <div style={{ color:'#444',fontSize:11,marginTop:8 }}>
+          {dwellMs<=500 ? '빠름 - 숙련된 사용자 권장' : dwellMs<=800 ? '보통 - 일반 권장값' : dwellMs<=1000 ? '느림 - 초보 사용자 권장' : '매우 느림 - 중증 장애 학생 권장'}
         </div>
       </div>
 
@@ -951,7 +946,8 @@ function App() {
   const [maxRecMs,       setMaxRecMs]       = useState(3000);
   const [globalVolume,   setGlobalVolume]   = useState(1);
   const [cameraFacing,   setCameraFacing]   = useState('user');
-  const [defaultRecType, setDefaultRecType] = useState('video'); // 'video' | 'audio'
+  const [defaultRecType, setDefaultRecType] = useState('video');
+  const [dwellMs,        setDwellMs]        = useState(1000); // 시선 선택 시간
 
   const [pads,         setPads]         = useState(() => Array(12).fill(null));
   const [mode,         setMode]         = useState('play');
@@ -1016,12 +1012,14 @@ function App() {
   const gazeCalibRef   = useRef(false);
   const gazeObsRef     = useRef(null);
   const calibPtsRef    = useRef([]);
-  const modeRef        = useRef('play'); // gaze listener에서 mode 체크용
+  const modeRef        = useRef('play');
+  const dwellMsRef     = useRef(1000);
 
   useEffect(() => { padsRef.current = pads; },               [pads]);
   useEffect(() => { colsRef.current = cols; },               [cols]);
   useEffect(() => { rowsRef.current = rows; },               [rows]);
   useEffect(() => { maxRecMsRef.current = maxRecMs; },       [maxRecMs]);
+  useEffect(() => { dwellMsRef.current = dwellMs; },         [dwellMs]);
   useEffect(() => { globalVolRef.current = globalVolume; },  [globalVolume]);
   useEffect(() => { camFacingRef.current = cameraFacing; },  [cameraFacing]);
   useEffect(() => { defRecTypeRef.current = defaultRecType; },[defaultRecType]);
@@ -1151,6 +1149,7 @@ function App() {
     else if (k==='globalVolume')   setGlobalVolume(v);
     else if (k==='cameraFacing')   setCameraFacing(v);
     else if (k==='defaultRecType') setDefaultRecType(v);
+    else if (k==='dwellMs')        setDwellMs(v);
   };
 
   const handleReset = () => {
@@ -1343,6 +1342,9 @@ function App() {
   }, []);
   const stopPad = useCallback(idx => {
     setPlayKeys(k => { const n={...k}; delete n[idx]; return n; });
+    // 재생 완료 후 같은 패드 시선으로 즉시 재선택 가능하게 쿨다운 해제
+    const gh = gazeHoverRef.current;
+    if (gh.lastPlayIdx === idx) gh.lastPlayIdx = null;
   }, []);
 
   // ── Gaze Tracking ─────────────────────────────────────────────
@@ -1360,9 +1362,10 @@ function App() {
     const dot = document.getElementById('gaze-dot');
     if (dot) dot.style.display = 'none';
     // 모든 dwell 게이지 초기화
-    document.querySelectorAll('.dwell-arc').forEach(el => {
+    document.querySelectorAll('[id^="dwell-arc-"]').forEach(el => {
       el.style.transition = 'none';
-      el.setAttribute('stroke-dasharray','0 999');
+      el.style.transform = 'translate(-50%,-50%) scale(0)';
+      el.style.opacity = '0';
     });
     clearTimeout(gazeHoverRef.current.timerId);
     gazeHoverRef.current = {idx:null, startMs:null, timerId:null};
@@ -1451,7 +1454,11 @@ function App() {
 
         const resetArc = (id) => {
           const el = document.getElementById(`dwell-arc-${id}`);
-          if (el) { el.style.transition = 'none'; el.setAttribute('stroke-dasharray','0 999'); }
+          if (el) {
+            el.style.transition = 'none';
+            el.style.transform = 'translate(-50%,-50%) scale(0)';
+            el.style.opacity = '0';
+          }
         };
 
         if (!gazeModeRef.current) return;
@@ -1461,27 +1468,37 @@ function App() {
         if (hovIdx !== gh.idx) {
           if (gh.idx !== null) resetArc(gh.idx);
           clearTimeout(gh.timerId);
-          // 패드 밖으로 나가면 쿨다운 해제 → 같은 패드 재선택 가능
           if (hovIdx === null) gh.lastPlayIdx = null;
           const blocked = (hovIdx !== null && hovIdx === gh.lastPlayIdx);
           gh.idx = hovIdx; gh.timerId = null;
           if (hovIdx !== null && !blocked) {
+            const dwell = dwellMsRef.current;
             const arc = document.getElementById(`dwell-arc-${hovIdx}`);
             if (arc) {
               arc.style.transition = 'none';
-              arc.setAttribute('stroke-dasharray','0 999');
+              arc.style.transform = 'translate(-50%,-50%) scale(1)';
+              arc.style.opacity = '0.85';
               requestAnimationFrame(() => {
-                arc.style.transition = `stroke-dasharray ${DWELL_MS}ms linear`;
-                requestAnimationFrame(() => arc.setAttribute('stroke-dasharray','999 0'));
+                arc.style.transition = `transform ${dwell}ms linear, opacity ${dwell}ms linear`;
+                requestAnimationFrame(() => {
+                  arc.style.transform = 'translate(-50%,-50%) scale(0.08)';
+                  arc.style.opacity = '0.15';
+                });
               });
             }
             gh.timerId = setTimeout(() => {
               resetArc(hovIdx);
+              // 완료 flash
+              const padEl = document.querySelector(`[data-pi="${hovIdx}"]`);
+              if (padEl) {
+                padEl.style.filter = 'brightness(2.2)';
+                setTimeout(() => { padEl.style.filter = ''; }, 180);
+              }
               gh.lastPlayIdx = hovIdx;
               gh.idx = null; gh.timerId = null;
               resumeAudioCtx();
               playPad(hovIdx);
-            }, DWELL_MS);
+            }, dwell);
           }
         }
       });
@@ -1766,8 +1783,8 @@ function App() {
               {/* Playback */}
               {pad&&isPlay&&(
                 isAudio
-                  ? <PadAudio key={playKey} url={pad.url} volume={vol} onEnd={()=>stopPad(i)} />
-                  : <PadVideo key={playKey} url={pad.url} volume={vol} onEnd={()=>stopPad(i)} trimStart={pad.trimStart} trimEnd={pad.trimEnd} />
+                  ? <PadAudio key={playKey} url={pad.url} volume={vol} onEnd={()=>{ stopPad(i); if(gazeHoverRef.current.lastPlayIdx===i) gazeHoverRef.current.lastPlayIdx=null; }} />
+                  : <PadVideo key={playKey} url={pad.url} volume={vol} onEnd={()=>{ stopPad(i); if(gazeHoverRef.current.lastPlayIdx===i) gazeHoverRef.current.lastPlayIdx=null; }} trimStart={pad.trimStart} trimEnd={pad.trimEnd} />
               )}
 
               {/* Play glow */}
@@ -1786,19 +1803,16 @@ function App() {
               {/* Gradient overlay */}
               {pad&&!isPlay&&!isRec&&<div style={{ position:'absolute',inset:0,zIndex:2,background:'linear-gradient(to top,rgba(0,0,0,0.55) 0%,transparent 55%)',borderRadius:14 }} />}
 
-              {/* Dwell ring (gaze dwell 게이지) */}
+              {/* Dwell ring - 큰 원이 수축 (연구 권장 방식) */}
               {gazeMode&&pad&&(
-                <div className="dwell-ring">
-                  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-                    <circle id={`dwell-arc-${i}`} className="dwell-arc"
-                      cx="50" cy="50" r="40"
-                      fill="none" stroke="#4CC9F0" strokeWidth="5"
-                      strokeDasharray="0 999" strokeLinecap="round"
-                      transform="rotate(-90 50 50)"
-                      style={{opacity:0.85}}
-                    />
-                  </svg>
-                </div>
+                <div id={`dwell-arc-${i}`} style={{
+                  position:'absolute', top:'50%', left:'50%',
+                  width:'92%', height:'92%', borderRadius:'50%',
+                  border:'5px solid #4CC9F0',
+                  transform:'translate(-50%,-50%) scale(0)',
+                  opacity:0, pointerEvents:'none', zIndex:20,
+                  boxShadow:'0 0 20px rgba(76,201,240,0.5)',
+                }} />
               )}
 
               {/* Audio playing wave indicator */}
@@ -1910,7 +1924,7 @@ function App() {
       {trimModal&&<TrimModal file={trimModal.file} recType={defaultRecType} padIdx={trimModal.idx} maxRecMs={maxRecMs} onDone={handleTrimDone} onClose={()=>setTrimModal(null)} />}
       {thumbPrompt&&<ThumbPromptModal padIdx={thumbPrompt.idx} currentThumb={thumbPrompt.pad.thumb} onSave={handleThumbSave} onSkip={handleThumbSkip} />}
       <HelpPanel open={showHelp} onClose={()=>setShowHelp(false)} />
-      <Settings open={showSettings} onClose={()=>setShowSettings(false)} cfg={{cols,rows,maxRecMs,globalVolume,cameraFacing,defaultRecType}} set={setSetting} onReset={handleReset} />
+      <Settings open={showSettings} onClose={()=>setShowSettings(false)} cfg={{cols,rows,maxRecMs,globalVolume,cameraFacing,defaultRecType,dwellMs}} set={setSetting} onReset={handleReset} />
       {editPad&&<EditModal pad={pads[editPad.idx]} onSave={saveEdit} onClose={()=>setEditPad(null)} />}
       {confirm&&<Confirm msg={confirm.msg} onOk={confirm.onOk} onCancel={()=>setConfirm(null)} />}
       {toast&&<Toast msg={toast} />}
