@@ -22,8 +22,8 @@
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:#4CC9F0;cursor:pointer}
   input[type=text]{background:#1a1a2e;border:1px solid #2a2a3e;color:#fff;border-radius:8px;padding:10px 12px;font-size:14px;width:100%;outline:none}
   input[type=text]:focus{border-color:#4CC9F0}
-  #gaze-dot{position:fixed;width:52px;height:52px;border-radius:50%;background:rgba(76,201,240,0.18);border:4px solid #4CC9F0;pointer-events:none;z-index:9000;display:none;transform:translate(-50%,-50%);box-shadow:0 0 0 6px rgba(76,201,240,0.12),0 0 28px rgba(76,201,240,0.5);transition:left 0.1s ease-out,top 0.1s ease-out}
-  #gaze-dot::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:#4CC9F0;box-shadow:0 0 8px #4CC9F0}
+  #gaze-dot{position:fixed;width:70px;height:70px;border-radius:50%;background:rgba(76,201,240,0.15);border:5px solid #4CC9F0;pointer-events:none;z-index:9000;display:none;transform:translate(-50%,-50%);box-shadow:0 0 0 8px rgba(76,201,240,0.08),0 0 32px rgba(76,201,240,0.45)}
+  #gaze-dot::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:#4CC9F0;box-shadow:0 0 10px #4CC9F0}
   .dwell-ring{position:absolute;inset:0;pointer-events:none;z-index:20;border-radius:14px;overflow:hidden}
   .dwell-ring svg{position:absolute;inset:0;width:100%;height:100%}
   #webgazerVideoFeed,#webgazerFaceOverlay,#webgazerFaceFeedbackBox,#webgazerVideoContainerElement{display:none!important;width:1px!important;height:1px!important;opacity:0!important}
@@ -1361,10 +1361,17 @@ function App() {
           onReady?.();
         }
         if (!data) return;
-        // dwell 로직만 처리 (포인터 이동은 rAF에서)
-        if (!gazeModeRef.current) return;
+
+        // EMA smoothing - ALPHA 낮을수록 빠르게 반응
+        const ALPHA = 0.6;
         const sm = gazeSmoothRef.current;
-        if (sm.x === null) return;
+        sm.x = sm.x === null ? data.x : sm.x * ALPHA + data.x * (1 - ALPHA);
+        sm.y = sm.y === null ? data.y : sm.y * ALPHA + data.y * (1 - ALPHA);
+
+        const dot = document.getElementById('gaze-dot');
+        if (dot) { dot.style.left = sm.x + 'px'; dot.style.top = sm.y + 'px'; dot.style.display = 'block'; }
+
+        if (!gazeModeRef.current) return;
         const sx = sm.x, sy = sm.y;
         const rects = padRectsRef.current;
         let hovIdx = null;
@@ -1397,26 +1404,6 @@ function App() {
           }
         }
       });
-
-    // rAF로 webgazerGazeDot 위치를 읽어 커스텀 포인터에 반영
-    const trackLoop = () => {
-      if (!gazeModeRef.current && !gazeCalibRef.current) return;
-      const src = document.getElementById('webgazerGazeDot');
-      if (src) {
-        const x = parseFloat(src.style.left);
-        const y = parseFloat(src.style.top);
-        if (!isNaN(x) && !isNaN(y)) {
-          const ALPHA = 0.55;
-          const sm = gazeSmoothRef.current;
-          sm.x = sm.x === null ? x : sm.x * ALPHA + x * (1 - ALPHA);
-          sm.y = sm.y === null ? y : sm.y * ALPHA + y * (1 - ALPHA);
-          const dot = document.getElementById('gaze-dot');
-          if (dot) { dot.style.left=sm.x+'px'; dot.style.top=sm.y+'px'; dot.style.display='block'; }
-        }
-      }
-      requestAnimationFrame(trackLoop);
-    };
-    requestAnimationFrame(trackLoop);
     await window.webgazer.begin();
     hideWebgazerEls();
     // gaze listener가 아예 호출 안 되는 경우 fallback (4초 후 강제 진행)
