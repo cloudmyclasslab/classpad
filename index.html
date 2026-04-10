@@ -451,16 +451,19 @@ function GazeAutoRecalib({ onDone }) {
     <div style={{position:'fixed',inset:0,background:'#000',zIndex:850,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20,touchAction:'none'}}>
       <div style={{color:'#aaa',fontSize:13,letterSpacing:1}}>화면 중앙을 바라봐 주세요</div>
 
-      {/* 캘리브레이션 검증과 동일한 파란 바운스 점 */}
+      {/* 고정 파란 점 + 글로우 */}
       <div style={{
         width:80, height:80, borderRadius:'50%',
-        background:'rgba(76,201,240,0.2)',
-        border:'3px solid #4CC9F0',
+        background:'rgba(76,201,240,0.15)',
+        border:'2px solid rgba(76,201,240,0.4)',
         display:'flex', alignItems:'center', justifyContent:'center',
-        boxShadow:'0 0 40px rgba(76,201,240,0.6)',
-        animation:'pulse 0.8s ease-in-out infinite',
+        boxShadow:'0 0 40px rgba(76,201,240,0.3)',
       }}>
-        <div style={{width:16,height:16,borderRadius:'50%',background:'#4CC9F0'}} />
+        <div style={{
+          width:18, height:18, borderRadius:'50%',
+          background:'#4CC9F0',
+          boxShadow:'0 0 20px rgba(76,201,240,1), 0 0 40px rgba(76,201,240,0.5)',
+        }} />
       </div>
 
       <button onPointerDown={onDone} style={{padding:'7px 24px',borderRadius:50,border:'1px solid #222',background:'transparent',color:'#333',fontSize:11,cursor:'pointer'}}>건너뛰기</button>
