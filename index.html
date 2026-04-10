@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>클래스 패드 Beta</title>
+<title>마이클래스 패드 Beta</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -190,7 +190,7 @@ const CALIB_GRID = [
   [16.7,50  ],[50,50  ],[83.3,50  ],
   [16.7,83.3],[50,83.3],[83.3,83.3],
 ];
-const CLICKS_PER_PT = 3;
+const CLICKS_PER_PT = 5; // 포인트당 5회 기록 (정확도 향상)
 
 function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
   const [cur, setCur] = React.useState(0);
@@ -234,12 +234,12 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
               style={{
                 borderRadius:20,
                 background: isDone
-                  ? 'rgba(6,214,160,0.18)'
+                  ? 'rgba(0,0,0,0.75)'
                   : isActive
                     ? 'rgba(255,214,10,0.18)'
                     : 'rgba(255,255,255,0.03)',
                 border: isDone
-                  ? '2.5px solid #06D6A0'
+                  ? '1.5px solid rgba(255,255,255,0.08)'
                   : isActive
                     ? '3px solid #FFD60A'
                     : '2px solid rgba(255,255,255,0.06)',
@@ -252,7 +252,7 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
               }}
             >
               {isDone ? (
-                <span style={{fontSize:40}}>✅</span>
+                <span style={{fontSize:24,opacity:0.35}}>✓</span>
               ) : isActive ? (
                 <>
                   <span style={{fontSize:58,lineHeight:1,filter:'drop-shadow(0 0 12px rgba(255,214,10,0.9))',animation:'pulse 0.7s ease-in-out infinite'}}>
@@ -1072,6 +1072,7 @@ function App() {
   const calibPtsRef    = useRef([]);
   const modeRef        = useRef('play');
   const dwellMsRef     = useRef(1000);
+  const gazeStableRef  = useRef({idx:null, count:0}); // 시선 안정화 필터
 
   useEffect(() => { padsRef.current = pads; },               [pads]);
   useEffect(() => { colsRef.current = cols; },               [cols]);
@@ -1448,6 +1449,18 @@ function App() {
       });
     } catch(e) { console.error('calib save:', e); }
     calibPtsRef.current = [];
+    // 패드 위치에 추가 캘리브레이션 포인트 등록 (2×2 정확도 향상)
+    setTimeout(() => {
+      const rects = padRectsRef.current;
+      rects.forEach(r => {
+        if (!r) return;
+        const cx = (r.left + r.right) / 2;
+        const cy = (r.top + r.bottom) / 2;
+        for (let k = 0; k < 3; k++) {
+          try { window.webgazer?.recordScreenPosition(cx, cy, 'click'); } catch {}
+        }
+      });
+    }, 200);
     setTimeout(updatePadRects, 150);
   }, [updatePadRects]);
 
@@ -1487,21 +1500,33 @@ function App() {
         }
         if (!data) return;
 
-        // 어느 패드 위인지 계산
+        // 어느 패드 위인지 계산 (패드 범위를 20px 여유 있게 확장)
         const rects = padRectsRef.current;
         let hovIdx = null;
         for (let i = 0; i < rects.length; i++) {
           const r = rects[i];
           if (!r) continue;
-          if (data.x >= r.left && data.x <= r.right && data.y >= r.top && data.y <= r.bottom) { hovIdx = i; break; }
+          const PAD = 20;
+          if (data.x >= r.left-PAD && data.x <= r.right+PAD && data.y >= r.top-PAD && data.y <= r.bottom+PAD) { hovIdx = i; break; }
         }
 
-        // dot: dwell이 진행 중인 패드 중앙에만 표시
+        // 안정화 필터: 같은 패드에 연속 4프레임 이상 있어야 hover 변경
+        const stable = gazeStableRef.current;
+        if (hovIdx === stable.idx) {
+          stable.count = Math.min(stable.count + 1, 99);
+        } else {
+          stable.idx = hovIdx;
+          stable.count = 1;
+        }
+        const STABLE_FRAMES = 4;
+        const stableHovIdx = stable.count >= STABLE_FRAMES ? hovIdx : gazeHoverRef.current.idx;
+
+        // dot: dwell 진행 중인 패드 중앙에만 표시
         const dot = document.getElementById('gaze-dot');
         if (dot) {
           const gh0 = gazeHoverRef.current;
-          if (hovIdx !== null && gh0.timerId !== null && !gazeCalibRef.current && modeRef.current === 'play') {
-            const r = rects[hovIdx];
+          if (stableHovIdx !== null && gh0.timerId !== null && !gazeCalibRef.current && modeRef.current === 'play') {
+            const r = rects[stableHovIdx];
             dot.style.left = ((r.left + r.right) / 2) + 'px';
             dot.style.top  = ((r.top + r.bottom) / 2) + 'px';
             dot.style.display = 'block';
@@ -1523,15 +1548,15 @@ function App() {
         if (modeRef.current !== 'play') return;
 
         const gh = gazeHoverRef.current;
-        if (hovIdx !== gh.idx) {
+        if (stableHovIdx !== gh.idx) {
           if (gh.idx !== null) resetArc(gh.idx);
           clearTimeout(gh.timerId);
-          if (hovIdx === null) gh.lastPlayIdx = null;
-          const blocked = (hovIdx !== null && hovIdx === gh.lastPlayIdx);
-          gh.idx = hovIdx; gh.timerId = null;
-          if (hovIdx !== null && !blocked) {
+          if (stableHovIdx === null) gh.lastPlayIdx = null;
+          const blocked = (stableHovIdx !== null && stableHovIdx === gh.lastPlayIdx);
+          gh.idx = stableHovIdx; gh.timerId = null;
+          if (stableHovIdx !== null && !blocked) {
             const dwell = dwellMsRef.current;
-            const arc = document.getElementById(`dwell-arc-${hovIdx}`);
+            const arc = document.getElementById(`dwell-arc-${stableHovIdx}`);
             if (arc) {
               arc.style.transition = 'none';
               arc.style.transform = 'translate(-50%,-50%) scale(1)';
@@ -1545,18 +1570,17 @@ function App() {
               });
             }
             gh.timerId = setTimeout(() => {
-              resetArc(hovIdx);
-              // 완료 flash
-              const padEl = document.querySelector(`[data-pi="${hovIdx}"]`);
+              resetArc(stableHovIdx);
+              const padEl = document.querySelector(`[data-pi="${stableHovIdx}"]`);
               if (padEl) {
                 padEl.style.filter = 'brightness(2.2)';
                 setTimeout(() => { padEl.style.filter = ''; }, 180);
               }
-              gh.lastPlayIdx = hovIdx;
+              gh.lastPlayIdx = stableHovIdx;
               gh.idx = null; gh.timerId = null;
-              unlockAudioPool(); // 풀 보충 + AudioContext 유지
-              resumeAudioCtx(); // AudioContext running 상태 유지
-              playPad(hovIdx);
+              unlockAudioPool();
+              resumeAudioCtx();
+              playPad(stableHovIdx);
             }, dwell);
           }
         }
@@ -1791,7 +1815,7 @@ function App() {
       <div ref={headerRef} style={{ width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 0 12px',gap:8,flexShrink:0 }}>
         <div>
           <div style={{ color:'#fff',fontSize:18,fontWeight:800,letterSpacing:-0.5 }}>
-            🎓 클래스 패드 <span style={{ fontSize:11,color:'#4CC9F0',fontWeight:700,verticalAlign:'middle' }}>Beta</span>
+            🎓 마이클래스 패드 <span style={{ fontSize:11,color:'#4CC9F0',fontWeight:700,verticalAlign:'middle' }}>Beta</span>
           </div>
           <div style={{ color:'#555',fontSize:10,marginTop:2 }}>
             {mode==='record' ? (dragFrom!==null ? '놓을 위치로 이동' : `탭: ${defaultRecType==='audio'?'🎙 녹음':'🎬 녹화'} | 꾹: 순서 변경`) : '패드를 눌러 재생'}
