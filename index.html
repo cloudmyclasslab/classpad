@@ -198,29 +198,37 @@ function PadAudio({ url, volume, onEnd }) {
 }
 
 // ── Gaze Calibration ──────────────────────────────────────────
-const DWELL_MS = 1500;
-const CALIB_GRID = [
-  [16.7,16.7],[50,16.7],[83.3,16.7],
-  [16.7,50  ],[50,50  ],[83.3,50  ],
-  [16.7,83.3],[50,83.3],[83.3,83.3],
-];
+const DWELL_MS       = 1500;
 const CLICKS_PER_PT  = 5;
-const CALIB_HOLD_MS  = 2000; // 각 패드 자동 인식 시간 (ms)
-const CALIB_PAUSE_MS = 400;  // 패드 간 전환 대기
+const CALIB_HOLD_MS  = 2000;
+const CALIB_PAUSE_MS = 400;
+// 점진적 순서: 코너(4) → 중앙(1) → 엣지(4)
+const CALIB_GRID_ORDERED = [
+  [16.7,16.7],[83.3,16.7],[16.7,83.3],[83.3,83.3], // 코너
+  [50,50],                                           // 중앙
+  [50,16.7],[16.7,50],[83.3,50],[50,83.3],          // 엣지
+];
+const CALIB_VERIFY_POINT = [50,50]; // 검증 포인트
+const ACCURACY_THRESHOLD = 120;     // px - 이 이내면 "good"
 
 function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
-  const [cur,      setCur]      = React.useState(-1); // -1 = 준비 카운트다운
-  const [ready,    setReady]    = React.useState(3);  // 3·2·1 카운트다운
-  const [progress, setProgress] = React.useState(0);  // 0~1 진행률
-  const timerRef   = React.useRef(null);
-  const rafRef     = React.useRef(null);
-  const startRef   = React.useRef(null);
+  const [phase,    setPhase]    = React.useState('countdown'); // countdown|calibrating|verifying|done
+  const [cur,      setCur]      = React.useState(0);
+  const [maxPts,   setMaxPts]   = React.useState(5); // 5(코너+중앙) or 9(전체)
+  const [ready,    setReady]    = React.useState(3);
+  const [progress, setProgress] = React.useState(0);
+  const [accuracy, setAccuracy] = React.useState(null); // px error or null
+  const timerRef  = React.useRef(null);
+  const rafRef    = React.useRef(null);
+  const startRef  = React.useRef(null);
+  const preds     = React.useRef([]);
 
-  // 패드 기록 함수
+  // 패드 기록
   const recordPad = React.useCallback((i) => {
     unlockAudioPool();
-    const x = window.innerWidth  * CALIB_GRID[i][0] / 100;
-    const y = window.innerHeight * CALIB_GRID[i][1] / 100;
+    const pt = CALIB_GRID_ORDERED[i];
+    const x = window.innerWidth  * pt[0] / 100;
+    const y = window.innerHeight * pt[1] / 100;
     for (let k = 0; k < CLICKS_PER_PT; k++) {
       try { window.webgazer?.recordScreenPosition(x, y, 'click'); } catch {}
     }
@@ -232,11 +240,8 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
     setProgress(0);
     startRef.current = performance.now();
     const animate = (now) => {
-      const elapsed = now - startRef.current;
-      setProgress(Math.min(elapsed / CALIB_HOLD_MS, 1));
-      if (elapsed < CALIB_HOLD_MS) {
-        rafRef.current = requestAnimationFrame(animate);
-      }
+      setProgress(Math.min((now - startRef.current) / CALIB_HOLD_MS, 1));
+      if (now - startRef.current < CALIB_HOLD_MS) rafRef.current = requestAnimationFrame(animate);
     };
     rafRef.current = requestAnimationFrame(animate);
     timerRef.current = setTimeout(() => {
@@ -244,32 +249,76 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
       recordPad(i);
       setProgress(1);
       setTimeout(() => {
-        if (i + 1 >= CALIB_GRID.length) { onDone(); }
-        else { setCur(i + 1); }
+        const next = i + 1;
+        if (next >= maxPts) {
+          // 5포인트 완료 → 정확도 검증
+          setPhase('verifying');
+        } else {
+          setCur(next);
+        }
       }, CALIB_PAUSE_MS);
     }, CALIB_HOLD_MS);
-  }, [recordPad, onDone]);
+  }, [recordPad, maxPts]);
 
-  // 3·2·1 카운트다운 후 시작
+  // 정확도 검증: 1초간 예측 수집
+  const runVerify = React.useCallback(() => {
+    preds.current = [];
+    const collect = setInterval(() => {
+      try {
+        window.webgazer?.getCurrentPrediction().then(p => {
+          if (p) preds.current.push({x: p.x, y: p.y});
+        });
+      } catch {}
+    }, 100);
+    setTimeout(() => {
+      clearInterval(collect);
+      if (preds.current.length === 0) {
+        // 예측 없음 → 전체 캘리브 진행
+        setMaxPts(9); setCur(5); setPhase('calibrating');
+        return;
+      }
+      const mx = preds.current.reduce((s,p)=>s+p.x,0)/preds.current.length;
+      const my = preds.current.reduce((s,p)=>s+p.y,0)/preds.current.length;
+      const ex = window.innerWidth  * CALIB_VERIFY_POINT[0] / 100;
+      const ey = window.innerHeight * CALIB_VERIFY_POINT[1] / 100;
+      const err = Math.round(Math.hypot(mx - ex, my - ey));
+      setAccuracy(err);
+      if (err <= ACCURACY_THRESHOLD) {
+        // 충분히 정확 → 완료
+        setTimeout(onDone, 1200);
+      } else {
+        // 부족 → 엣지 포인트 추가 캘리브
+        setTimeout(() => { setMaxPts(9); setCur(5); setPhase('calibrating'); }, 1200);
+      }
+    }, 1200);
+  }, [onDone]);
+
+  // 3·2·1 카운트다운
   React.useEffect(() => {
+    if (phase !== 'countdown') return;
     if (ready > 0) {
       const t = setTimeout(() => setReady(r => r - 1), 1000);
       return () => clearTimeout(t);
     } else {
-      setCur(0);
+      setPhase('calibrating');
     }
-  }, [ready]);
+  }, [ready, phase]);
 
-  // 새 패드가 활성화될 때 타이머 시작
+  // 캘리브레이션 진행
   React.useEffect(() => {
-    if (cur < 0) return;
+    if (phase !== 'calibrating') return;
     startPad(cur);
     return () => { clearTimeout(timerRef.current); cancelAnimationFrame(rafRef.current); };
-  }, [cur]);
+  }, [cur, phase]);
+
+  // 검증 시작
+  React.useEffect(() => {
+    if (phase !== 'verifying') return;
+    runVerify();
+  }, [phase]);
 
   const emojis = ['⭐','🌟','✨','🎯','🌈','🎪','💫','🔥','🎨'];
-
-  // 원형 SVG 진행 게이지 (수축 방향)
+  const totalPts = CALIB_GRID_ORDERED.length;
   const R = 36, C = 2 * Math.PI * R;
   const dash = C * (1 - progress);
 
@@ -277,72 +326,105 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
     <div style={{position:'fixed',inset:0,background:'#000',zIndex:800,display:'flex',flexDirection:'column',touchAction:'none'}}>
       {/* 헤더 */}
       <div style={{textAlign:'center',padding:'16px 0 8px',flexShrink:0}}>
-        <div style={{color:'#fff',fontWeight:800,fontSize:18}}>👁️ 시선 캘리브레이션</div>
-        {ready > 0 ? (
-          <div style={{color:'#aaa',fontSize:13,marginTop:4}}>준비하세요 — 자동으로 시작됩니다</div>
-        ) : (
-          <div style={{color:'#aaa',fontSize:13,marginTop:4}}>
+        <div style={{color:'#fff',fontWeight:800,fontSize:18}}>
+          {phase==='verifying' ? '🔍 정확도 확인 중...' : '👁️ 시선 캘리브레이션'}
+        </div>
+        <div style={{color:'#aaa',fontSize:13,marginTop:4}}>
+          {phase==='countdown' && '준비하세요 — 자동으로 시작됩니다'}
+          {phase==='calibrating' && <>
             <span style={{color:'#FFD60A',fontWeight:700}}>빛나는 패드</span>를 바라보세요 &nbsp;
-            <span style={{color:'#555'}}>({Math.max(cur,0)+1} / {CALIB_GRID.length})</span>
-          </div>
-        )}
+            <span style={{color:'#555'}}>({cur+1} / {maxPts})</span>
+          </>}
+          {phase==='verifying' && (accuracy === null
+            ? '화면 중앙을 바라봐 주세요'
+            : accuracy <= ACCURACY_THRESHOLD
+              ? <span style={{color:'#06D6A0',fontWeight:700}}>✓ 정확도 양호 ({accuracy}px)</span>
+              : <span style={{color:'#FFB703',fontWeight:700}}>추가 보정이 필요합니다 ({accuracy}px)</span>
+          )}
+        </div>
         <div style={{display:'flex',gap:12,justifyContent:'center',marginTop:8,flexWrap:'wrap'}}>
           <span style={{color:'#4CC9F0',fontSize:11}}>📏 40~60cm 거리</span>
           <span style={{color:'#4CC9F0',fontSize:11}}>💡 정면 조명</span>
           <span style={{color:'#4CC9F0',fontSize:11}}>🪑 고정된 자세</span>
         </div>
+        {/* 전체 진행 바 */}
         <div style={{width:200,height:4,background:'#1a1a2e',borderRadius:2,margin:'8px auto 0',overflow:'hidden'}}>
-          <div style={{width:`${Math.max(cur,0)/CALIB_GRID.length*100}%`,height:'100%',background:'linear-gradient(90deg,#FFD60A,#FF6B35)',borderRadius:2,transition:'width 0.3s'}} />
+          <div style={{
+            width:`${phase==='verifying' ? 95 : cur/totalPts*100}%`,
+            height:'100%',
+            background:'linear-gradient(90deg,#FFD60A,#FF6B35)',
+            borderRadius:2,transition:'width 0.3s'
+          }} />
         </div>
       </div>
 
-      {/* 준비 카운트다운 오버레이 */}
-      {ready > 0 && (
+      {/* 3·2·1 오버레이 */}
+      {phase==='countdown' && ready > 0 && (
         <div style={{position:'absolute',inset:0,zIndex:10,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.6)'}}>
           <div key={ready} style={{fontSize:96,fontWeight:900,color:'#FFD60A',textShadow:'0 0 40px rgba(255,214,10,0.8)',animation:'countPop 0.7s ease-out forwards'}}>{ready}</div>
         </div>
       )}
 
-      {/* 3×3 그리드 */}
-      <div style={{flex:1,display:'grid',gridTemplateColumns:'repeat(3,1fr)',gridTemplateRows:'repeat(3,1fr)',gap:8,padding:8}}>
-        {CALIB_GRID.map((_, i) => {
-          const isActive = i === cur;
-          const isDone   = i < cur;
-          return (
-            <div key={i} style={{
-              borderRadius:20,
-              background: isDone ? 'rgba(0,0,0,0.75)' : isActive ? 'rgba(255,214,10,0.18)' : 'rgba(255,255,255,0.03)',
-              border: isDone ? '1.5px solid rgba(255,255,255,0.08)' : isActive ? '3px solid #FFD60A' : '2px solid rgba(255,255,255,0.06)',
-              display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:4,
-              position:'relative', overflow:'hidden',
-              boxShadow: isActive ? '0 0 48px rgba(255,214,10,0.7), inset 0 0 30px rgba(255,214,10,0.12)' : 'none',
-              transition:'background 0.25s, border 0.25s, box-shadow 0.25s',
-            }}>
-              {isDone ? (
-                <span style={{fontSize:24,opacity:0.35}}>✓</span>
-              ) : isActive ? (
-                <>
-                  {/* 원형 카운트다운 게이지 */}
-                  <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none'}} viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r={R} fill="none" stroke="rgba(255,214,10,0.15)" strokeWidth="6"/>
-                    <circle cx="50" cy="50" r={R} fill="none" stroke="#FFD60A" strokeWidth="6"
-                      strokeDasharray={`${C - dash} ${dash}`}
-                      strokeLinecap="round"
-                      transform="rotate(-90 50 50)"
-                      style={{transition:'stroke-dasharray 0.05s linear'}}
-                    />
-                  </svg>
-                  <span style={{fontSize:52,lineHeight:1,filter:'drop-shadow(0 0 12px rgba(255,214,10,0.9))',animation:'pulse 0.7s ease-in-out infinite',position:'relative',zIndex:1}}>
-                    {emojis[i]}
-                  </span>
-                </>
-              ) : (
-                <span style={{fontSize:30,opacity:0.12}}>{emojis[i]}</span>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      {/* 검증 화면 - 중앙 포인트 */}
+      {phase==='verifying' && (
+        <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div style={{
+            width:80,height:80,borderRadius:'50%',
+            background:'rgba(76,201,240,0.2)',border:'3px solid #4CC9F0',
+            display:'flex',alignItems:'center',justifyContent:'center',
+            boxShadow:'0 0 40px rgba(76,201,240,0.6)',
+            animation:'pulse 0.8s ease-in-out infinite',
+          }}>
+            <div style={{width:16,height:16,borderRadius:'50%',background:'#4CC9F0'}} />
+          </div>
+        </div>
+      )}
+
+      {/* 3×3 그리드 (캘리브 중) */}
+      {phase==='calibrating' && (
+        <div style={{flex:1,display:'grid',gridTemplateColumns:'repeat(3,1fr)',gridTemplateRows:'repeat(3,1fr)',gap:8,padding:8}}>
+          {CALIB_GRID_ORDERED.map((_, i) => {
+            const isActive = phase==='calibrating' && i === cur;
+            const isDone   = i < cur || (phase==='verifying' && i < maxPts);
+            const isExtra  = i >= 5; // 엣지 포인트
+            if (i >= maxPts && !isActive) {
+              // 아직 진행 안 한 엣지는 희미하게
+              return <div key={i} style={{borderRadius:20,background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.04)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <span style={{fontSize:20,opacity:0.06}}>{emojis[i]}</span>
+              </div>;
+            }
+            return (
+              <div key={i} style={{
+                borderRadius:20,
+                background: isDone ? 'rgba(0,0,0,0.75)' : isActive ? 'rgba(255,214,10,0.18)' : 'rgba(255,255,255,0.03)',
+                border: isDone ? '1.5px solid rgba(255,255,255,0.08)' : isActive ? '3px solid #FFD60A' : `2px solid ${isExtra?'rgba(255,107,53,0.2)':'rgba(255,255,255,0.06)'}`,
+                display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,
+                position:'relative',overflow:'hidden',
+                boxShadow: isActive ? '0 0 48px rgba(255,214,10,0.7),inset 0 0 30px rgba(255,214,10,0.12)' : 'none',
+                transition:'background 0.25s,border 0.25s,box-shadow 0.25s',
+              }}>
+                {isDone ? (
+                  <span style={{fontSize:24,opacity:0.35}}>✓</span>
+                ) : isActive ? (
+                  <>
+                    <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none'}} viewBox="0 0 100 100">
+                      <circle cx="50" cy="50" r={R} fill="none" stroke="rgba(255,214,10,0.15)" strokeWidth="6"/>
+                      <circle cx="50" cy="50" r={R} fill="none" stroke="#FFD60A" strokeWidth="6"
+                        strokeDasharray={`${C-dash} ${dash}`} strokeLinecap="round"
+                        transform="rotate(-90 50 50)" style={{transition:'stroke-dasharray 0.05s linear'}}/>
+                    </svg>
+                    <span style={{fontSize:52,lineHeight:1,filter:'drop-shadow(0 0 12px rgba(255,214,10,0.9))',animation:'pulse 0.7s ease-in-out infinite',position:'relative',zIndex:1}}>
+                      {emojis[i]}
+                    </span>
+                  </>
+                ) : (
+                  <span style={{fontSize:30,opacity:isExtra?0.06:0.12}}>{emojis[i]}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <button onPointerDown={e=>{e.stopPropagation();onCancel();}} style={{margin:'8px auto 14px',padding:'10px 32px',borderRadius:50,border:'1px solid #2a2a3e',background:'transparent',color:'#555',fontSize:13,cursor:'pointer'}}>취소</button>
     </div>
@@ -991,7 +1073,7 @@ function Settings({ open, onClose, cfg, set, onReset }) {
   const hMove = e => { if(!dg.current.on) return; const y=Math.max(0,(e.clientY||e.touches?.[0]?.clientY||0)-dg.current.y0); dg.current.dy=y; setTy(y); };
   const hUp   = () => { if(!dg.current.on) return; dg.current.on=false; if(dg.current.dy>120){onClose();setTy(0);}else setTy(0); };
   if (!open) return null;
-  const { cols, rows, maxRecMs, globalVolume, cameraFacing, defaultRecType, dwellMs } = cfg;
+  const { cols, rows, maxRecMs, globalVolume, cameraFacing, defaultRecType, dwellMs, nystagmusMode } = cfg;
   const sBtn = a => ({ flex:1,padding:'8px 0',borderRadius:8,border:'none',cursor:'pointer',fontWeight:700,fontSize:12,background:a?'#4CC9F0':'#1A1A2E',color:a?'#000':'#555' });
   const stBtn = d => ({ width:36,height:36,borderRadius:8,border:'1px solid #2a2a3e',background:'#1A1A2E',color:d?'#333':'#fff',fontSize:20,cursor:d?'default':'pointer',display:'flex',alignItems:'center',justifyContent:'center' });
   const sec = { color:'#666',fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:10 };
@@ -1067,6 +1149,18 @@ function Settings({ open, onClose, cfg, set, onReset }) {
         </div>
       </div>
 
+      {/* 👁️ 시선 트래킹 설정 */}
+      <div style={{ marginBottom:24 }}>
+        <div style={sec}>👁️ 안진증 모드</div>
+        <div style={{ display:'flex',gap:8 }}>
+          <button style={sBtn(!nystagmusMode)} onClick={()=>set('nystagmusMode',false)}>일반</button>
+          <button style={sBtn(nystagmusMode)}  onClick={()=>set('nystagmusMode',true)}>🧿 안진증</button>
+        </div>
+        <div style={{ color:'#444',fontSize:11,marginTop:8 }}>
+          {nystagmusMode ? '불수의적 안구 운동 학생용 — 인식 범위 확대 + 강한 안정화' : '일반 시선 트래킹 모드'}
+        </div>
+      </div>
+
       <button onClick={onReset} style={{ width:'100%',padding:'14px 0',borderRadius:12,border:'none',background:'#2a0a0a',color:'#FF4D6D',fontWeight:700,fontSize:14,cursor:'pointer' }}>
         🗑 전체 초기화
       </button>
@@ -1083,7 +1177,8 @@ function App() {
   const [globalVolume,   setGlobalVolume]   = useState(1);
   const [cameraFacing,   setCameraFacing]   = useState('user');
   const [defaultRecType, setDefaultRecType] = useState('video');
-  const [dwellMs,        setDwellMs]        = useState(1000); // 시선 선택 시간
+  const [dwellMs,        setDwellMs]        = useState(1000);
+  const [nystagmusMode,  setNystagmusMode]  = useState(false); // 안진증 모드
 
   const [pads,         setPads]         = useState(() => Array(12).fill(null));
   const [mode,         setMode]         = useState('play');
@@ -1150,7 +1245,13 @@ function App() {
   const calibPtsRef    = useRef([]);
   const modeRef        = useRef('play');
   const dwellMsRef     = useRef(1000);
-  const gazeStableRef  = useRef({idx:null, count:0}); // 시선 안정화 필터
+  const gazeStableRef    = useRef({idx:null, count:0});
+  const gazePrevRef      = useRef({x:null, y:null});       // saccade rejection
+  const gazeVarianceRef  = useRef({samples:[], variance:0}); // adaptive dwell
+  const gazeCornerRef    = useRef({corner:null, since:null, notified:false}); // quick recalib
+  const gazeStartTimeRef = useRef(null);                   // auto-reminder
+  const nystagmusModeRef = useRef(false);
+  const adaptiveDwellRef = useRef(1000);                   // 실시간 조정된 dwell
 
   useEffect(() => { padsRef.current = pads; },               [pads]);
   useEffect(() => { colsRef.current = cols; },               [cols]);
@@ -1163,6 +1264,7 @@ function App() {
   useEffect(() => { gazeModeRef.current = gazeMode; }, [gazeMode]);
   useEffect(() => { gazeCalibRef.current = gazeCalib; }, [gazeCalib]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
+  useEffect(() => { nystagmusModeRef.current = nystagmusMode; }, [nystagmusMode]);
 
   // ── Save ─────────────────────────────────────────────────────
   const performSave = async curPads => {
@@ -1170,7 +1272,8 @@ function App() {
     await dbPut('metadata', {
       cols:colsRef.current, rows:rowsRef.current, maxRecMs:maxRecMsRef.current,
       globalVolume:globalVolRef.current, cameraFacing:camFacingRef.current,
-      defaultRecType:defRecTypeRef.current, dwellMs:dwellMsRef.current, padMeta
+      defaultRecType:defRecTypeRef.current, dwellMs:dwellMsRef.current,
+      nystagmusMode:nystagmusModeRef.current, padMeta
     });
     await Promise.all(curPads.map(async (p,i) => {
       if (p?.url) { const blob = await fetch(p.url).then(r=>r.blob()); await dbPut(`blob_${i}`, blob); }
@@ -1191,7 +1294,7 @@ function App() {
     clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() =>
       performSave(padsRef.current).catch(console.error), 1000);
-  }, [cols, rows, maxRecMs, globalVolume, cameraFacing, defaultRecType, dwellMs]);
+  }, [cols, rows, maxRecMs, globalVolume, cameraFacing, defaultRecType, dwellMs, nystagmusMode]);
 
   // ── Load ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -1200,7 +1303,8 @@ function App() {
         const meta = await dbGet('metadata');
         if (meta) {
           const { cols:c, rows:r, maxRecMs:mr, globalVolume:gv,
-                  cameraFacing:cf, defaultRecType:drt, dwellMs:dm, padMeta } = meta;
+                  cameraFacing:cf, defaultRecType:drt, dwellMs:dm,
+                  nystagmusMode:nm, padMeta } = meta;
           if (c)              setCols(c);
           if (r)              setRows(r);
           if (mr)             setMaxRecMs(mr);
@@ -1208,6 +1312,7 @@ function App() {
           if (cf)             setCameraFacing(cf);
           if (drt)            setDefaultRecType(drt);
           if (dm)             setDwellMs(dm);
+          if (nm !== undefined) setNystagmusMode(nm);
           const total = (c||4)*(r||3);
           const np = Array(total).fill(null);
           for (let i = 0; i < total; i++) {
@@ -1287,7 +1392,8 @@ function App() {
     else if (k==='globalVolume')   setGlobalVolume(v);
     else if (k==='cameraFacing')   setCameraFacing(v);
     else if (k==='defaultRecType') setDefaultRecType(v);
-    else if (k==='dwellMs')        setDwellMs(v);
+    else if (k==='dwellMs')          setDwellMs(v);
+    else if (k==='nystagmusMode')    setNystagmusMode(v);
   };
 
   const handleReset = () => {
@@ -1507,9 +1613,14 @@ function App() {
       el.style.opacity = '0';
     });
     clearTimeout(gazeHoverRef.current.timerId);
-    gazeHoverRef.current = {idx:null, startMs:null, timerId:null};
-    gazeSmoothRef.current = {x: null, y: null};
-    gazeStableRef.current = {idx: null, count: 0};
+    gazeHoverRef.current  = {idx:null, timerId:null, lastPlayIdx:null, exitCount:0};
+    gazeSmoothRef.current = {x:null, y:null};
+    gazeStableRef.current = {idx:null, count:0};
+    gazePrevRef.current   = {x:null, y:null};
+    gazeVarianceRef.current = {samples:[], variance:0};
+    gazeCornerRef.current = {corner:null, since:null, notified:false};
+    gazeStartTimeRef.current = null;
+    adaptiveDwellRef.current = dwellMsRef.current;
     setGazeMode(false);
     setGazeCalib(false);
     setGazeLoading(false);
@@ -1519,7 +1630,8 @@ function App() {
     setGazeCalib(false);
     gazeCalibRef.current = false;
     setGazeMode(true);
-    gazeModeRef.current = true; // 즉시 반영 (setState는 비동기)
+    gazeModeRef.current = true;
+    gazeStartTimeRef.current = Date.now();
     // 캘리브레이션 포인트 DB 저장
     try {
       await dbPut('gaze_calibration', {
@@ -1589,25 +1701,86 @@ function App() {
         }
         if (!data) return;
 
-        // 어느 패드 위인지 계산 (패드 범위를 20px 여유 있게 확장)
+        // ── Saccade Rejection ─────────────────────────────
+        // 프레임 간 이동 거리가 너무 크면(눈 떨림) 무시
+        const SACCADE_THRESHOLD = nystagmusModeRef.current ? 350 : 220;
+        const prev = gazePrevRef.current;
+        if (prev.x !== null) {
+          const dist = Math.hypot(data.x - prev.x, data.y - prev.y);
+          if (dist > SACCADE_THRESHOLD) {
+            gazePrevRef.current = {x: data.x, y: data.y};
+            return;
+          }
+        }
+        gazePrevRef.current = {x: data.x, y: data.y};
+
+        // ── Adaptive Dwell ────────────────────────────────
+        // 최근 20프레임 시선 분산 → dwell 시간 자동 조정
+        const vr = gazeVarianceRef.current;
+        vr.samples.push({x: data.x, y: data.y});
+        if (vr.samples.length > 20) vr.samples.shift();
+        if (vr.samples.length >= 10) {
+          const mx = vr.samples.reduce((s,p)=>s+p.x,0)/vr.samples.length;
+          const my = vr.samples.reduce((s,p)=>s+p.y,0)/vr.samples.length;
+          vr.variance = vr.samples.reduce((s,p)=>s+Math.pow(p.x-mx,2)+Math.pow(p.y-my,2),0)/vr.samples.length;
+          const base = dwellMsRef.current;
+          // 분산 낮음(안정) → 빠르게, 높음(흔들림) → 느리게 (±40%)
+          const factor = nystagmusModeRef.current
+            ? Math.min(1.5, 0.8 + vr.variance / 3000)
+            : Math.min(1.4, 0.7 + vr.variance / 4000);
+          adaptiveDwellRef.current = Math.round(Math.max(300, Math.min(base * 1.5, base * factor)));
+        }
+
+        // ── Auto-reminder (10분 후) ───────────────────────
+        if (gazeStartTimeRef.current && (Date.now() - gazeStartTimeRef.current) > 10 * 60 * 1000) {
+          gazeStartTimeRef.current = null; // 한 번만
+          showToast('👁️ 캘리브레이션을 다시 하면 정확도가 올라갑니다');
+        }
+
+        // ── 패드 감지 ─────────────────────────────────────
         const rects = padRectsRef.current;
+        const nys = nystagmusModeRef.current;
+        const PAD_MARGIN = nys ? 40 : 20;
         let hovIdx = null;
         for (let i = 0; i < rects.length; i++) {
           const r = rects[i];
           if (!r) continue;
-          const PAD = 20;
-          if (data.x >= r.left-PAD && data.x <= r.right+PAD && data.y >= r.top-PAD && data.y <= r.bottom+PAD) { hovIdx = i; break; }
+          if (data.x >= r.left-PAD_MARGIN && data.x <= r.right+PAD_MARGIN &&
+              data.y >= r.top-PAD_MARGIN  && data.y <= r.bottom+PAD_MARGIN) { hovIdx = i; break; }
         }
 
-        // 안정화 필터: 같은 패드에 연속 4프레임 이상 있어야 hover 변경
+        // ── Quick Recalibration (코너 3초 응시) ───────────
+        if (gazeModeRef.current && hovIdx === null) {
+          const W = window.innerWidth, H = window.innerHeight;
+          const CORNER_SIZE = 80;
+          let corner = null;
+          if (data.x < CORNER_SIZE && data.y < CORNER_SIZE) corner = 'TL';
+          else if (data.x > W-CORNER_SIZE && data.y < CORNER_SIZE) corner = 'TR';
+          else if (data.x < CORNER_SIZE && data.y > H-CORNER_SIZE) corner = 'BL';
+          else if (data.x > W-CORNER_SIZE && data.y > H-CORNER_SIZE) corner = 'BR';
+
+          const cr = gazeCornerRef.current;
+          if (corner) {
+            if (cr.corner !== corner) { cr.corner = corner; cr.since = Date.now(); cr.notified = false; }
+            else if (!cr.notified && Date.now() - cr.since > 3000) {
+              cr.notified = true;
+              try { window.webgazer?.recordScreenPosition(data.x, data.y, 'click'); } catch {}
+              showToast('📍 코너 보정 완료');
+            }
+          } else {
+            cr.corner = null; cr.since = null; cr.notified = false;
+          }
+        }
+
+        // ── 안정화 필터 ───────────────────────────────────
         const stable = gazeStableRef.current;
+        const STABLE_FRAMES = nys ? 6 : 4;
         if (hovIdx === stable.idx) {
           stable.count = Math.min(stable.count + 1, 99);
         } else {
           stable.idx = hovIdx;
           stable.count = 1;
         }
-        const STABLE_FRAMES = 4;
         const stableHovIdx = stable.count >= STABLE_FRAMES ? hovIdx : gazeHoverRef.current.idx;
 
         // dot: dwell 진행 중인 패드 중앙에만 표시
@@ -1656,7 +1829,7 @@ function App() {
           const blocked = (effectiveIdx !== null && effectiveIdx === gh.lastPlayIdx);
           gh.idx = effectiveIdx; gh.timerId = null; gh.exitCount = 0;
           if (effectiveIdx !== null && !blocked) {
-            const dwell = dwellMsRef.current;
+            const dwell = adaptiveDwellRef.current;
             const arc = document.getElementById(`dwell-arc-${effectiveIdx}`);
             if (arc) {
               arc.style.transition = 'none';
@@ -2108,7 +2281,7 @@ function App() {
       {trimModal&&<TrimModal file={trimModal.file} recType={defaultRecType} padIdx={trimModal.idx} maxRecMs={maxRecMs} onDone={handleTrimDone} onClose={()=>setTrimModal(null)} />}
       {thumbPrompt&&<ThumbPromptModal padIdx={thumbPrompt.idx} currentThumb={thumbPrompt.pad.thumb} onSave={handleThumbSave} onSkip={handleThumbSkip} />}
       <HelpPanel open={showHelp} onClose={()=>setShowHelp(false)} />
-      <Settings open={showSettings} onClose={()=>setShowSettings(false)} cfg={{cols,rows,maxRecMs,globalVolume,cameraFacing,defaultRecType,dwellMs}} set={setSetting} onReset={handleReset} />
+      <Settings open={showSettings} onClose={()=>setShowSettings(false)} cfg={{cols,rows,maxRecMs,globalVolume,cameraFacing,defaultRecType,dwellMs,nystagmusMode}} set={setSetting} onReset={handleReset} />
       {editPad&&<EditModal pad={pads[editPad.idx]} onSave={saveEdit} onClose={()=>setEditPad(null)} />}
       {confirm&&<Confirm msg={confirm.msg} onOk={confirm.onOk} onCancel={()=>setConfirm(null)} />}
       {toast&&<Toast msg={toast} />}
