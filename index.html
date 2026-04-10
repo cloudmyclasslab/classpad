@@ -22,7 +22,8 @@
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:#4CC9F0;cursor:pointer}
   input[type=text]{background:#1a1a2e;border:1px solid #2a2a3e;color:#fff;border-radius:8px;padding:10px 12px;font-size:14px;width:100%;outline:none}
   input[type=text]:focus{border-color:#4CC9F0}
-  #gaze-dot{position:fixed;width:20px;height:20px;border-radius:50%;background:rgba(76,201,240,0.45);border:2px solid rgba(76,201,240,0.9);pointer-events:none;z-index:9000;display:none;transform:translate(-50%,-50%);transition:left 0.04s linear,top 0.04s linear;box-shadow:0 0 10px rgba(76,201,240,0.5)}
+  #gaze-dot{position:fixed;width:28px;height:28px;border-radius:50%;background:rgba(76,201,240,0.25);border:3px solid #4CC9F0;pointer-events:none;z-index:9000;display:none;transform:translate(-50%,-50%);box-shadow:0 0 0 3px rgba(76,201,240,0.2),0 0 16px rgba(76,201,240,0.6);transition:left 0.06s linear,top 0.06s linear}
+  #gaze-dot::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:6px;height:6px;border-radius:50%;background:#4CC9F0}
   .dwell-ring{position:absolute;inset:0;pointer-events:none;z-index:20;border-radius:14px;overflow:hidden}
   .dwell-ring svg{position:absolute;inset:0;width:100%;height:100%}
   #webgazerVideoFeed,#webgazerFaceOverlay,#webgazerFaceFeedbackBox,#webgazerVideoContainerElement{display:none!important;width:1px!important;height:1px!important;opacity:0!important}
@@ -146,7 +147,7 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
   };
 
   return (
-    <div onClick={handleClick} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.97)',zIndex:800,cursor:'crosshair',touchAction:'manipulation'}}>
+    <div onPointerDown={handleClick} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.97)',zIndex:800,cursor:'pointer',touchAction:'manipulation',userSelect:'none',WebkitUserSelect:'none'}}>
       {/* 안내 */}
       <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',textAlign:'center',pointerEvents:'none',width:'80%'}}>
         <div style={{color:'#fff',fontWeight:800,fontSize:18,marginBottom:6}}>👁️ 시선 캘리브레이션</div>
@@ -167,7 +168,7 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
       }}>
         <div style={{position:'absolute',inset:6,borderRadius:'50%',background:'#FF4D6D',opacity:0.9}} />
       </div>
-      <button onClick={e=>{e.stopPropagation();onCancel();}} style={{position:'absolute',bottom:40,left:'50%',transform:'translateX(-50%)',padding:'10px 28px',borderRadius:50,border:'1px solid #333',background:'transparent',color:'#666',fontSize:13,cursor:'pointer'}}>취소</button>
+      <button onPointerDown={e=>{e.stopPropagation();onCancel();}} style={{position:'absolute',bottom:40,left:'50%',transform:'translateX(-50%)',padding:'10px 28px',borderRadius:50,border:'1px solid #333',background:'transparent',color:'#666',fontSize:13,cursor:'pointer'}}>취소</button>
     </div>
   );
 }
@@ -1307,9 +1308,10 @@ function App() {
 
   const startGazeEngine = useCallback(async () => {
     window.webgazer.setGazeListener((data) => {
-        if (!data || !gazeModeRef.current) return;
+        if (!data) return;
         const dot = document.getElementById('gaze-dot');
         if (dot) { dot.style.left=data.x+'px'; dot.style.top=data.y+'px'; dot.style.display='block'; }
+        if (!gazeModeRef.current) return;
         const rects = padRectsRef.current;
         let hovIdx = null;
         for (let i = 0; i < rects.length; i++) {
