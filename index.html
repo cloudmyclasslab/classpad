@@ -26,7 +26,8 @@
   #gaze-dot::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:#4CC9F0;box-shadow:0 0 8px #4CC9F0}
   .dwell-ring{position:absolute;inset:0;pointer-events:none;z-index:20;border-radius:14px;overflow:hidden}
   .dwell-ring svg{position:absolute;inset:0;width:100%;height:100%}
-  #webgazerVideoFeed,#webgazerFaceOverlay,#webgazerFaceFeedbackBox,#webgazerVideoContainerElement,#webgazerGazeDot{display:none!important;width:1px!important;height:1px!important;opacity:0!important}
+  #webgazerVideoFeed,#webgazerFaceOverlay,#webgazerFaceFeedbackBox,#webgazerVideoContainerElement{display:none!important;width:1px!important;height:1px!important;opacity:0!important}
+  #webgazerGazeDot{opacity:0!important;pointer-events:none!important}
 </style>
 </head>
 <body>
@@ -1334,7 +1335,7 @@ function App() {
   }, []);
 
   const hideWebgazerEls = useCallback(() => {
-    const ids = ['webgazerVideoFeed','webgazerFaceOverlay','webgazerFaceFeedbackBox','webgazerVideoContainerElement','webgazerGazeDot'];
+    const ids = ['webgazerVideoFeed','webgazerFaceOverlay','webgazerFaceFeedbackBox','webgazerVideoContainerElement'];
     ids.forEach(id => {
       const el = document.getElementById(id);
       if (el) { el.style.setProperty('display','none','important'); el.style.setProperty('visibility','hidden','important'); }
@@ -1354,24 +1355,16 @@ function App() {
 
     let firstData = true;
     window.webgazer.setGazeListener((data) => {
-        // 첫 콜백 수신 시 무조건 onReady (data가 null이어도 WebGazer가 실행 중임을 의미)
         if (firstData) {
           firstData = false;
           hideWebgazerEls();
           onReady?.();
         }
         if (!data) return;
-
-        // EMA smoothing
-        const ALPHA = 0.72;
-        const sm = gazeSmoothRef.current;
-        sm.x = sm.x === null ? data.x : sm.x * ALPHA + data.x * (1 - ALPHA);
-        sm.y = sm.y === null ? data.y : sm.y * ALPHA + data.y * (1 - ALPHA);
-
-        const dot = document.getElementById('gaze-dot');
-        if (dot) { dot.style.left=sm.x+'px'; dot.style.top=sm.y+'px'; dot.style.display='block'; }
+        // dwell 로직만 처리 (포인터 이동은 rAF에서)
         if (!gazeModeRef.current) return;
-
+        const sm = gazeSmoothRef.current;
+        if (sm.x === null) return;
         const sx = sm.x, sy = sm.y;
         const rects = padRectsRef.current;
         let hovIdx = null;
@@ -1403,7 +1396,27 @@ function App() {
             }, DWELL_MS);
           }
         }
-      })
+      });
+
+    // rAF로 webgazerGazeDot 위치를 읽어 커스텀 포인터에 반영
+    const trackLoop = () => {
+      if (!gazeModeRef.current && !gazeCalibRef.current) return;
+      const src = document.getElementById('webgazerGazeDot');
+      if (src) {
+        const x = parseFloat(src.style.left);
+        const y = parseFloat(src.style.top);
+        if (!isNaN(x) && !isNaN(y)) {
+          const ALPHA = 0.55;
+          const sm = gazeSmoothRef.current;
+          sm.x = sm.x === null ? x : sm.x * ALPHA + x * (1 - ALPHA);
+          sm.y = sm.y === null ? y : sm.y * ALPHA + y * (1 - ALPHA);
+          const dot = document.getElementById('gaze-dot');
+          if (dot) { dot.style.left=sm.x+'px'; dot.style.top=sm.y+'px'; dot.style.display='block'; }
+        }
+      }
+      requestAnimationFrame(trackLoop);
+    };
+    requestAnimationFrame(trackLoop);
     await window.webgazer.begin();
     hideWebgazerEls();
     // gaze listener가 아예 호출 안 되는 경우 fallback (4초 후 강제 진행)
