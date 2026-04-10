@@ -1864,7 +1864,9 @@ function App() {
       console.error(e);
       alert('카메라 권한이 필요합니다: ' + e.message);
     }
-  }, [startGazeEngine, gazeLoading, gazeMode]); = useCallback(async () => {
+  }, [startGazeEngine, gazeLoading, gazeMode]);
+
+  const handleGazeLoadSaved = useCallback(async () => {
     const saved = gazeStartModal;
     setGazeStartModal(null);
     try {
