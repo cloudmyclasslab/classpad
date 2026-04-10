@@ -1768,200 +1768,109 @@ function App() {
         }
         if (!data) return;
 
-        // ── Saccade Rejection ─────────────────────────────
-        // 프레임 간 이동 거리가 너무 크면(눈 떨림) 무시
-        const SACCADE_THRESHOLD = nystagmusModeRef.current ? 350 : 220;
+        // Saccade Rejection
         const prev = gazePrevRef.current;
-        if (prev.x !== null) {
-          const dist = Math.hypot(data.x - prev.x, data.y - prev.y);
-          if (dist > SACCADE_THRESHOLD) {
-            gazePrevRef.current = {x: data.x, y: data.y};
-            return;
-          }
+        if (prev.x !== null && Math.hypot(data.x-prev.x, data.y-prev.y) > 250) {
+          gazePrevRef.current = {x:data.x, y:data.y}; return;
         }
-        gazePrevRef.current = {x: data.x, y: data.y};
+        gazePrevRef.current = {x:data.x, y:data.y};
 
-        // ── Adaptive Dwell ────────────────────────────────
-        // 최근 20프레임 시선 분산 → dwell 시간 자동 조정
-        const vr = gazeVarianceRef.current;
-        vr.samples.push({x: data.x, y: data.y});
-        if (vr.samples.length > 20) vr.samples.shift();
-        if (vr.samples.length >= 10) {
-          const mx = vr.samples.reduce((s,p)=>s+p.x,0)/vr.samples.length;
-          const my = vr.samples.reduce((s,p)=>s+p.y,0)/vr.samples.length;
-          vr.variance = vr.samples.reduce((s,p)=>s+Math.pow(p.x-mx,2)+Math.pow(p.y-my,2),0)/vr.samples.length;
-          const base = dwellMsRef.current;
-          // 분산 낮음(안정) → 빠르게, 높음(흔들림) → 느리게 (±40%)
-          const factor = nystagmusModeRef.current
-            ? Math.min(1.5, 0.8 + vr.variance / 3000)
-            : Math.min(1.4, 0.7 + vr.variance / 4000);
-          adaptiveDwellRef.current = Math.round(Math.max(300, Math.min(base * 1.5, base * factor)));
-        }
-
-        // ── Auto-reminder (10분 후) ───────────────────────
-        if (gazeStartTimeRef.current && (Date.now() - gazeStartTimeRef.current) > 10 * 60 * 1000) {
-          gazeStartTimeRef.current = null; // 한 번만
+        // Auto-reminder (10분)
+        if (gazeStartTimeRef.current && Date.now()-gazeStartTimeRef.current > 600000) {
+          gazeStartTimeRef.current = null;
           showToast('👁️ 캘리브레이션을 다시 하면 정확도가 올라갑니다');
         }
 
-        // ── 패드 감지 - 가장 가까운 패드 중심 선택 ──────────
+        // 패드 감지 - 가장 가까운 패드 선택
         const rects = padRectsRef.current;
         const nys = nystagmusModeRef.current;
-        let hovIdx = null;
-        let minDist = Infinity;
+        let hovIdx = null, minDist = Infinity;
         for (let i = 0; i < rects.length; i++) {
           const r = rects[i];
-          if (!r) continue;
-          // 재생 중인 패드는 dwell 대상에서 제외
-          if (playKeysRef.current[i]) continue;
-          const padW = r.right - r.left;
-          const padH = r.bottom - r.top;
-          const PAD_MARGIN = Math.round(Math.min(padW, padH) * (nys ? 0.25 : 0.15));
-          if (data.x >= r.left-PAD_MARGIN && data.x <= r.right+PAD_MARGIN &&
-              data.y >= r.top-PAD_MARGIN  && data.y <= r.bottom+PAD_MARGIN) {
-            // 겹침 시 중심 거리가 가장 가까운 패드 선택
-            const cx = (r.left + r.right) / 2;
-            const cy = (r.top  + r.bottom) / 2;
-            const dist = Math.hypot(data.x - cx, data.y - cy);
-            if (dist < minDist) { minDist = dist; hovIdx = i; }
+          if (!r || playKeysRef.current[i]) continue;
+          const m = Math.round(Math.min(r.right-r.left, r.bottom-r.top) * (nys?0.25:0.15));
+          if (data.x>=r.left-m && data.x<=r.right+m && data.y>=r.top-m && data.y<=r.bottom+m) {
+            const d = Math.hypot(data.x-(r.left+r.right)/2, data.y-(r.top+r.bottom)/2);
+            if (d < minDist) { minDist=d; hovIdx=i; }
           }
         }
 
-        // ── 품질 모니터 - 장시간(30초) 패드 전혀 인식 못할 때만 보정 제안 ──
-        const qr = gazeQualityRef.current;
-        qr.frames++;
-        if (hovIdx !== null) qr.misses = 0; // 한 번이라도 패드 인식 시 리셋
-        else qr.misses++;
-        // 900프레임(~30초) 연속 미스 + 쿨다운 지났을 때만 트리거
-        const now = Date.now();
-        const cooldown = !qr.lastTrigger || (now - qr.lastTrigger) > 60000; // 60초 쿨다운
-        if (qr.misses >= 900 && gazeModeRef.current && !gazeCalibRef.current && cooldown) {
-          qr.misses = 0; qr.frames = 0; qr.lastTrigger = now;
-          setGazeAutoRecalib(true);
-        }
+        // Quick Recalibration (코너 3초 응시)
         if (gazeModeRef.current && hovIdx === null) {
-          const W = window.innerWidth, H = window.innerHeight;
-          const CORNER_SIZE = 80;
+          const W=window.innerWidth, H=window.innerHeight, CS=80;
           let corner = null;
-          if (data.x < CORNER_SIZE && data.y < CORNER_SIZE) corner = 'TL';
-          else if (data.x > W-CORNER_SIZE && data.y < CORNER_SIZE) corner = 'TR';
-          else if (data.x < CORNER_SIZE && data.y > H-CORNER_SIZE) corner = 'BL';
-          else if (data.x > W-CORNER_SIZE && data.y > H-CORNER_SIZE) corner = 'BR';
-
+          if (data.x<CS && data.y<CS) corner='TL';
+          else if (data.x>W-CS && data.y<CS) corner='TR';
+          else if (data.x<CS && data.y>H-CS) corner='BL';
+          else if (data.x>W-CS && data.y>H-CS) corner='BR';
           const cr = gazeCornerRef.current;
           if (corner) {
-            if (cr.corner !== corner) { cr.corner = corner; cr.since = Date.now(); cr.notified = false; }
-            else if (!cr.notified && Date.now() - cr.since > 3000) {
-              cr.notified = true;
-              try { window.webgazer?.recordScreenPosition(data.x, data.y, 'click'); } catch {}
+            if (cr.corner!==corner) { cr.corner=corner; cr.since=Date.now(); cr.notified=false; }
+            else if (!cr.notified && Date.now()-cr.since>3000) {
+              cr.notified=true;
+              try { window.webgazer?.recordScreenPosition(data.x,data.y,'click'); } catch {}
               showToast('📍 코너 보정 완료');
             }
-          } else {
-            cr.corner = null; cr.since = null; cr.notified = false;
-          }
+          } else { cr.corner=null; cr.since=null; cr.notified=false; }
         }
 
-        // ── 안정화 필터 ───────────────────────────────────
+        // 안정화 필터 (4프레임)
         const stable = gazeStableRef.current;
-        const STABLE_FRAMES = nys ? 6 : 4;
-        if (hovIdx === stable.idx) {
-          stable.count = Math.min(stable.count + 1, 99);
-        } else {
-          stable.idx = hovIdx;
-          stable.count = 1;
-        }
-        const stableHovIdx = stable.count >= STABLE_FRAMES ? hovIdx : gazeHoverRef.current.idx;
+        const STABLE = nys ? 6 : 4;
+        if (hovIdx===stable.idx) stable.count=Math.min(stable.count+1,99);
+        else { stable.idx=hovIdx; stable.count=1; }
+        const stableIdx = stable.count>=STABLE ? hovIdx : gazeHoverRef.current.idx;
 
-        // dot: dwell 진행 중인 패드 중앙에만 표시
+        // dot 표시
         const dot = document.getElementById('gaze-dot');
         if (dot) {
-          const gh0 = gazeHoverRef.current;
-          if (stableHovIdx !== null && gh0.timerId !== null && !gazeCalibRef.current && modeRef.current === 'play') {
-            const r = rects[stableHovIdx];
-            dot.style.left = ((r.left + r.right) / 2) + 'px';
-            dot.style.top  = ((r.top + r.bottom) / 2) + 'px';
-            dot.style.display = 'block';
-          } else {
-            dot.style.display = 'none';
-          }
+          if (stableIdx!==null && gazeHoverRef.current.timerId!==null &&
+              !gazeCalibRef.current && modeRef.current==='play') {
+            const r=rects[stableIdx];
+            if (r) { dot.style.left=((r.left+r.right)/2)+'px'; dot.style.top=((r.top+r.bottom)/2)+'px'; dot.style.display='block'; }
+          } else { dot.style.display='none'; }
         }
 
         const resetArc = (id) => {
           const el = document.getElementById(`dwell-arc-${id}`);
-          if (el) {
-            el.style.transition = 'none';
-            el.style.transform = 'translate(-50%,-50%) scale(0)';
-            el.style.opacity = '0';
-          }
+          if (el) { el.style.transition='none'; el.style.transform='translate(-50%,-50%) scale(0)'; el.style.opacity='0'; }
         };
 
         if (!gazeModeRef.current) return;
         if (modeRef.current !== 'play') return;
 
         const gh = gazeHoverRef.current;
-        // 짧은 이탈 허용: dwell 진행 중 잠깐 패드 밖으로 나가도 유지
-        const EXIT_TOLERANCE = 6; // ~200ms (30fps 기준)
-        let effectiveIdx = stableHovIdx;
-        if (stableHovIdx === null && gh.idx !== null && gh.timerId !== null) {
-          gh.exitCount = (gh.exitCount || 0) + 1;
-          if (gh.exitCount <= EXIT_TOLERANCE) {
-            effectiveIdx = gh.idx; // 아직 허용 범위 → 현재 패드 유지
-          }
-        } else {
-          gh.exitCount = 0;
-        }
+        // 짧은 이탈 허용
+        let effectiveIdx = stableIdx;
+        if (stableIdx===null && gh.idx!==null && gh.timerId!==null) {
+          gh.exitCount = (gh.exitCount||0)+1;
+          if (gh.exitCount<=6) effectiveIdx=gh.idx;
+        } else { gh.exitCount=0; }
 
         if (effectiveIdx !== gh.idx) {
-          if (gh.idx !== null) {
-            resetArc(gh.idx);
-            // dwell 중간에 시선이 빠져나감 → 실패 (attempts는 이미 카운트됨)
-            // 실패율 체크: 10회 중 성공 2회 미만이면 자동 보정
-            if ((gh.dwellAttempts || 0) >= 10) {
-              const failRate = 1 - (gh.dwellSuccesses || 0) / gh.dwellAttempts;
-              if (failRate > 0.8) {
-                gh.dwellAttempts = 0; gh.dwellSuccesses = 0;
-                autoCorrectGaze(2, false); // weight 2 = 강한 보정
-              }
-            }
-          }
+          if (gh.idx!==null) resetArc(gh.idx);
           clearTimeout(gh.timerId);
-          if (effectiveIdx === null) gh.lastPlayIdx = null;
-          const blocked = (effectiveIdx !== null && effectiveIdx === gh.lastPlayIdx);
-          gh.idx = effectiveIdx; gh.timerId = null; gh.exitCount = 0;
-          if (effectiveIdx !== null && !blocked) {
-            const dwell = adaptiveDwellRef.current;
-            // dwell 시작 → attempt 카운트
-            gh.dwellAttempts = (gh.dwellAttempts || 0) + 1;
+          if (effectiveIdx===null) gh.lastPlayIdx=null;
+          const blocked = effectiveIdx!==null && effectiveIdx===gh.lastPlayIdx;
+          gh.idx=effectiveIdx; gh.timerId=null; gh.exitCount=0;
+          if (effectiveIdx!==null && !blocked) {
+            const dwell = dwellMsRef.current;
             const arc = document.getElementById(`dwell-arc-${effectiveIdx}`);
             if (arc) {
-              arc.style.transition = 'none';
-              arc.style.transform = 'translate(-50%,-50%) scale(1)';
-              arc.style.opacity = '0.85';
-              requestAnimationFrame(() => {
-                arc.style.transition = `transform ${dwell}ms linear, opacity ${dwell}ms linear`;
-                requestAnimationFrame(() => {
-                  arc.style.transform = 'translate(-50%,-50%) scale(0.08)';
-                  arc.style.opacity = '0.15';
-                });
+              arc.style.transition='none';
+              arc.style.transform='translate(-50%,-50%) scale(1)';
+              arc.style.opacity='0.85';
+              requestAnimationFrame(()=>{
+                arc.style.transition=`transform ${dwell}ms linear,opacity ${dwell}ms linear`;
+                requestAnimationFrame(()=>{ arc.style.transform='translate(-50%,-50%) scale(0.08)'; arc.style.opacity='0.15'; });
               });
             }
-            gh.timerId = setTimeout(() => {
+            gh.timerId = setTimeout(()=>{
               resetArc(effectiveIdx);
-              const padEl = document.querySelector(`[data-pi="${effectiveIdx}"]`);
-              if (padEl) {
-                padEl.style.filter = 'brightness(2.2)';
-                setTimeout(() => { padEl.style.filter = ''; }, 180);
-              }
-              // dwell 성공 카운트
-              gh.dwellSuccesses = (gh.dwellSuccesses || 0) + 1;
-              gh.lastPlayIdx = effectiveIdx;
-              gh.idx = null; gh.timerId = null; gh.exitCount = 0;
-              // 성공률 리셋 (10회마다)
-              if (gh.dwellAttempts >= 10) {
-                gh.dwellAttempts = 0; gh.dwellSuccesses = 0;
-              }
-              unlockAudioPool();
-              resumeAudioCtx();
+              const padEl=document.querySelector(`[data-pi="${effectiveIdx}"]`);
+              if (padEl) { padEl.style.filter='brightness(2.2)'; setTimeout(()=>{padEl.style.filter='';},180); }
+              gh.lastPlayIdx=effectiveIdx; gh.idx=null; gh.timerId=null; gh.exitCount=0;
+              unlockAudioPool(); resumeAudioCtx();
               playPad(effectiveIdx);
             }, dwell);
           }
