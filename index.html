@@ -141,30 +141,37 @@ function PadVideo({ url, volume, onEnd, trimStart, trimEnd }) {
   const audioRef = useRef(null);
   useEffect(() => {
     const v = ref.current; if (!v) return;
-    // video는 muted로 시각만 담당 (iOS audio 차단 우회)
-    // audio는 언락된 Audio 인스턴스로 별도 재생
     v.muted = true;
     if (trimStart) v.currentTime = trimStart;
     v.play().catch(console.error);
 
     const a = getUnlockedAudio();
+    let returned = false;
+    const safeReturn = () => { if (!returned) { returned = true; returnAudio(a); audioRef.current = null; } };
+
     a.src = url;
     a.volume = Math.max(0, Math.min(1, volume));
     if (trimStart) a.currentTime = trimStart;
     a.play().catch(console.error);
     audioRef.current = a;
 
-    const handleEnd = () => { returnAudio(a); audioRef.current = null; onEnd(); };
+    // 비디오 시간으로 오디오 싱크 보정 (0.3초 이상 차이 시 맞춤)
+    const syncInterval = setInterval(() => {
+      if (!audioRef.current || !v) return;
+      const diff = Math.abs(v.currentTime - audioRef.current.currentTime);
+      if (diff > 0.3) audioRef.current.currentTime = v.currentTime;
+    }, 1000);
+
+    const handleEnd = () => { clearInterval(syncInterval); safeReturn(); onEnd(); };
     if (trimEnd) {
-      const check = () => { if (v.currentTime >= trimEnd) { v.pause(); handleEnd(); } };
-      v.ontimeupdate = check;
+      v.ontimeupdate = () => { if (v.currentTime >= trimEnd) { v.pause(); handleEnd(); } };
     } else {
       a.onended = handleEnd;
-      v.onended = () => { if (!audioRef.current) return; }; // audio가 먼저 끝날 수 있음
     }
     return () => {
+      clearInterval(syncInterval);
       v.pause(); v.ontimeupdate = null; v.onended = null;
-      if (audioRef.current) { returnAudio(audioRef.current); audioRef.current = null; }
+      safeReturn();
     };
   }, []);
   return <video ref={ref} src={url} playsInline muted style={{ position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',borderRadius:14,zIndex:1 }} />;
@@ -173,11 +180,13 @@ function PadVideo({ url, volume, onEnd, trimStart, trimEnd }) {
 function PadAudio({ url, volume, onEnd }) {
   useEffect(() => {
     const a = getUnlockedAudio();
+    let returned = false;
+    const safeReturn = () => { if (!returned) { returned = true; returnAudio(a); } };
     a.src = url;
     a.volume = Math.max(0, Math.min(1, volume));
-    a.onended = () => { returnAudio(a); onEnd(); };
+    a.onended = () => { safeReturn(); onEnd(); };
     a.play().catch(console.error);
-    return () => { returnAudio(a); };
+    return () => { safeReturn(); };
   }, []);
   return null;
 }
@@ -217,6 +226,11 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
         <div style={{color:'#aaa',fontSize:13,marginTop:4}}>
           <span style={{color:'#FFD60A',fontWeight:700}}>빛나는 패드</span>를 바라보면서 탭하세요 &nbsp;
           <span style={{color:'#555'}}>({cur+1} / {CALIB_GRID.length})</span>
+        </div>
+        <div style={{display:'flex',gap:12,justifyContent:'center',marginTop:8,flexWrap:'wrap'}}>
+          <span style={{color:'#4CC9F0',fontSize:11}}>📏 화면에서 40~60cm 거리</span>
+          <span style={{color:'#4CC9F0',fontSize:11}}>💡 정면 조명</span>
+          <span style={{color:'#4CC9F0',fontSize:11}}>🪑 흔들리지 않는 자세</span>
         </div>
         <div style={{width:200,height:4,background:'#1a1a2e',borderRadius:2,margin:'8px auto 0',overflow:'hidden'}}>
           <div style={{width:`${cur/CALIB_GRID.length*100}%`,height:'100%',background:'linear-gradient(90deg,#FFD60A,#FF6B35)',borderRadius:2,transition:'width 0.3s'}} />
@@ -293,12 +307,16 @@ function GazeLoadingScreen({ onCancel }) {
 }
 
 // ── GazeStartModal ────────────────────────────────────────────
-function GazeStartModal({ savedAt, screenW, screenH, onNew, onLoad, onDelete, onCancel }) {
+function GazeStartModal({ savedAt, screenW, screenH, orientation, onNew, onLoad, onDelete, onCancel }) {
   const fmtDate = ts => {
     const d = new Date(ts);
     return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
   };
   const sameScreen = screenW === window.innerWidth && screenH === window.innerHeight;
+  const curOrientation = screen.orientation?.type || (window.innerWidth > window.innerHeight ? 'landscape' : 'portrait');
+  const orientationMismatch = orientation && !curOrientation.includes(orientation.includes('landscape') ? 'landscape' : 'portrait');
+  const statusColor = sameScreen ? '#06D6A0' : orientationMismatch ? '#FF4D6D' : '#FFB703';
+  const statusMsg = sameScreen ? '✓ 현재 화면과 일치' : orientationMismatch ? '⚠ 화면 방향이 다릅니다 - 새로 캘리브레이션 권장' : `⚠ 화면 크기 다름 (${screenW}×${screenH} → 자동 스케일링)`;
   return <>
     <div onClick={onCancel} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',zIndex:800}} />
     <div style={{position:'fixed',top:'50%',left:'50%',transform:'translate(-50%,-50%)',background:'#111128',borderRadius:20,padding:28,width:'min(320px,92vw)',zIndex:801,animation:'fadeIn 0.2s'}}>
@@ -310,9 +328,7 @@ function GazeStartModal({ savedAt, screenW, screenH, onNew, onLoad, onDelete, on
           <button onClick={onDelete} style={{background:'none',border:'none',color:'#FF4D6D',fontSize:11,cursor:'pointer',fontWeight:700}}>삭제</button>
         </div>
         <div style={{color:'#aaa',fontSize:12}}>저장일시: {fmtDate(savedAt)}</div>
-        <div style={{color:sameScreen?'#06D6A0':'#FFB703',fontSize:11,marginTop:4}}>
-          {sameScreen ? '✓ 현재 화면 크기와 일치' : `⚠ 다른 화면 크기 (${screenW}×${screenH} → 자동 스케일링)`}
-        </div>
+        <div style={{color:statusColor,fontSize:11,marginTop:4}}>{statusMsg}</div>
       </div>
       <div style={{display:'flex',flexDirection:'column',gap:10}}>
         <button onClick={onLoad} style={{padding:'13px 0',borderRadius:12,border:'none',background:'linear-gradient(135deg,#4CC9F0,#4361EE)',color:'#fff',fontWeight:700,fontSize:14,cursor:'pointer'}}>
@@ -1064,7 +1080,7 @@ function App() {
   const [gazeLoading,    setGazeLoading]    = useState(false); // begin() 후 첫 data 대기
   const [gazeStartModal, setGazeStartModal] = useState(null);
   const gazeModeRef    = useRef(false);
-  const gazeHoverRef   = useRef({idx:null, startMs:null, timerId:null});
+  const gazeHoverRef   = useRef({idx:null, timerId:null, lastPlayIdx:null, exitCount:0});
   const padRectsRef    = useRef([]);
   const gazeSmoothRef  = useRef({x: null, y: null});
   const gazeCalibRef   = useRef(false);
@@ -1092,7 +1108,7 @@ function App() {
     await dbPut('metadata', {
       cols:colsRef.current, rows:rowsRef.current, maxRecMs:maxRecMsRef.current,
       globalVolume:globalVolRef.current, cameraFacing:camFacingRef.current,
-      defaultRecType:defRecTypeRef.current, padMeta
+      defaultRecType:defRecTypeRef.current, dwellMs:dwellMsRef.current, padMeta
     });
     await Promise.all(curPads.map(async (p,i) => {
       if (p?.url) { const blob = await fetch(p.url).then(r=>r.blob()); await dbPut(`blob_${i}`, blob); }
@@ -1113,7 +1129,7 @@ function App() {
     clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() =>
       performSave(padsRef.current).catch(console.error), 1000);
-  }, [cols, rows, maxRecMs, globalVolume, cameraFacing, defaultRecType]);
+  }, [cols, rows, maxRecMs, globalVolume, cameraFacing, defaultRecType, dwellMs]);
 
   // ── Load ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -1122,13 +1138,14 @@ function App() {
         const meta = await dbGet('metadata');
         if (meta) {
           const { cols:c, rows:r, maxRecMs:mr, globalVolume:gv,
-                  cameraFacing:cf, defaultRecType:drt, padMeta } = meta;
+                  cameraFacing:cf, defaultRecType:drt, dwellMs:dm, padMeta } = meta;
           if (c)              setCols(c);
           if (r)              setRows(r);
           if (mr)             setMaxRecMs(mr);
           if (gv !== undefined) setGlobalVolume(gv);
           if (cf)             setCameraFacing(cf);
           if (drt)            setDefaultRecType(drt);
+          if (dm)             setDwellMs(dm);
           const total = (c||4)*(r||3);
           const np = Array(total).fill(null);
           for (let i = 0; i < total; i++) {
@@ -1263,9 +1280,9 @@ function App() {
   };
 
   const handleDeleteConfig = async cfg => {
-    // Delete blobs
-    const total = cfg.cols * cfg.rows;
-    await Promise.all(Array.from({length:total}, (_,i) => dbDel(`cfg_${cfg.id}_blob_${i}`)));
+    // cols*rows 외에도 최대 크기(8*6=48)까지 정리해서 blob 누수 방지
+    const maxPads = Math.max(cfg.cols * cfg.rows, 48);
+    await Promise.all(Array.from({length:maxPads}, (_,i) => dbDel(`cfg_${cfg.id}_blob_${i}`)));
     const list = await dbGet('cfg_list') || [];
     await dbPut('cfg_list', list.filter(c => c.id !== cfg.id));
   };
@@ -1417,6 +1434,7 @@ function App() {
 
   const stopGaze = useCallback(() => {
     try { window.webgazer?.pause(); } catch {}
+    try { window.webgazer?.clearData(); } catch {}
     gazeObsRef.current?.disconnect();
     const dot = document.getElementById('gaze-dot');
     if (dot) dot.style.display = 'none';
@@ -1429,6 +1447,7 @@ function App() {
     clearTimeout(gazeHoverRef.current.timerId);
     gazeHoverRef.current = {idx:null, startMs:null, timerId:null};
     gazeSmoothRef.current = {x: null, y: null};
+    gazeStableRef.current = {idx: null, count: 0};
     setGazeMode(false);
     setGazeCalib(false);
     setGazeLoading(false);
@@ -1445,6 +1464,7 @@ function App() {
         savedAt: Date.now(),
         screenW: window.innerWidth,
         screenH: window.innerHeight,
+        orientation: screen.orientation?.type || (window.innerWidth > window.innerHeight ? 'landscape' : 'portrait'),
         points: calibPtsRef.current,
       });
     } catch(e) { console.error('calib save:', e); }
@@ -1464,11 +1484,18 @@ function App() {
     setTimeout(updatePadRects, 150);
   }, [updatePadRects]);
 
-  const applyCalibPoints = useCallback((points, srcW, srcH) => {
-    const scaleX = window.innerWidth  / srcW;
-    const scaleY = window.innerHeight / srcH;
+  const applyCalibPoints = useCallback((points, srcW, srcH, srcOrientation) => {
+    const curOrientation = screen.orientation?.type || (window.innerWidth > window.innerHeight ? 'landscape' : 'portrait');
+    const orientationMismatch = srcOrientation && curOrientation &&
+      ((srcOrientation.includes('landscape') && !curOrientation.includes('landscape')) ||
+       (srcOrientation.includes('portrait')  && !curOrientation.includes('portrait')));
+    // orientation이 바뀌었으면 x↔y 스왑 후 스케일링
+    const scaleX = window.innerWidth  / (orientationMismatch ? srcH : srcW);
+    const scaleY = window.innerHeight / (orientationMismatch ? srcW : srcH);
     points.forEach(([sx, sy]) => {
-      try { window.webgazer?.recordScreenPosition(sx * scaleX, sy * scaleY, 'click'); } catch {}
+      const rx = orientationMismatch ? sy * scaleX : sx * scaleX;
+      const ry = orientationMismatch ? sx * scaleY : sy * scaleY;
+      try { window.webgazer?.recordScreenPosition(rx, ry, 'click'); } catch {}
     });
   }, []);
 
@@ -1548,15 +1575,27 @@ function App() {
         if (modeRef.current !== 'play') return;
 
         const gh = gazeHoverRef.current;
-        if (stableHovIdx !== gh.idx) {
+        // 짧은 이탈 허용: dwell 진행 중 잠깐 패드 밖으로 나가도 유지
+        const EXIT_TOLERANCE = 6; // ~200ms (30fps 기준)
+        let effectiveIdx = stableHovIdx;
+        if (stableHovIdx === null && gh.idx !== null && gh.timerId !== null) {
+          gh.exitCount = (gh.exitCount || 0) + 1;
+          if (gh.exitCount <= EXIT_TOLERANCE) {
+            effectiveIdx = gh.idx; // 아직 허용 범위 → 현재 패드 유지
+          }
+        } else {
+          gh.exitCount = 0;
+        }
+
+        if (effectiveIdx !== gh.idx) {
           if (gh.idx !== null) resetArc(gh.idx);
           clearTimeout(gh.timerId);
-          if (stableHovIdx === null) gh.lastPlayIdx = null;
-          const blocked = (stableHovIdx !== null && stableHovIdx === gh.lastPlayIdx);
-          gh.idx = stableHovIdx; gh.timerId = null;
-          if (stableHovIdx !== null && !blocked) {
+          if (effectiveIdx === null) gh.lastPlayIdx = null;
+          const blocked = (effectiveIdx !== null && effectiveIdx === gh.lastPlayIdx);
+          gh.idx = effectiveIdx; gh.timerId = null; gh.exitCount = 0;
+          if (effectiveIdx !== null && !blocked) {
             const dwell = dwellMsRef.current;
-            const arc = document.getElementById(`dwell-arc-${stableHovIdx}`);
+            const arc = document.getElementById(`dwell-arc-${effectiveIdx}`);
             if (arc) {
               arc.style.transition = 'none';
               arc.style.transform = 'translate(-50%,-50%) scale(1)';
@@ -1570,17 +1609,17 @@ function App() {
               });
             }
             gh.timerId = setTimeout(() => {
-              resetArc(stableHovIdx);
-              const padEl = document.querySelector(`[data-pi="${stableHovIdx}"]`);
+              resetArc(effectiveIdx);
+              const padEl = document.querySelector(`[data-pi="${effectiveIdx}"]`);
               if (padEl) {
                 padEl.style.filter = 'brightness(2.2)';
                 setTimeout(() => { padEl.style.filter = ''; }, 180);
               }
-              gh.lastPlayIdx = stableHovIdx;
-              gh.idx = null; gh.timerId = null;
+              gh.lastPlayIdx = effectiveIdx;
+              gh.idx = null; gh.timerId = null; gh.exitCount = 0;
               unlockAudioPool();
               resumeAudioCtx();
-              playPad(stableHovIdx);
+              playPad(effectiveIdx);
             }, dwell);
           }
         }
@@ -1630,7 +1669,7 @@ function App() {
         setGazeLoading(false);
         // 저장된 포인트 재주입
         setTimeout(() => {
-          applyCalibPoints(saved.points, saved.screenW, saved.screenH);
+          applyCalibPoints(saved.points, saved.screenW, saved.screenH, saved.orientation);
           setGazeMode(true);
           gazeModeRef.current = true;
           setTimeout(updatePadRects, 150);
@@ -2011,7 +2050,7 @@ function App() {
       {editPad&&<EditModal pad={pads[editPad.idx]} onSave={saveEdit} onClose={()=>setEditPad(null)} />}
       {confirm&&<Confirm msg={confirm.msg} onOk={confirm.onOk} onCancel={()=>setConfirm(null)} />}
       {toast&&<Toast msg={toast} />}
-      {gazeStartModal&&<GazeStartModal savedAt={gazeStartModal.savedAt} screenW={gazeStartModal.screenW} screenH={gazeStartModal.screenH} onNew={handleGazeNewCalib} onLoad={handleGazeLoadSaved} onDelete={handleGazeDeleteSaved} onCancel={()=>setGazeStartModal(null)} />}
+      {gazeStartModal&&<GazeStartModal savedAt={gazeStartModal.savedAt} screenW={gazeStartModal.screenW} screenH={gazeStartModal.screenH} orientation={gazeStartModal.orientation} onNew={handleGazeNewCalib} onLoad={handleGazeLoadSaved} onDelete={handleGazeDeleteSaved} onCancel={()=>setGazeStartModal(null)} />}
       {gazeLoading&&<GazeLoadingScreen onCancel={stopGaze} />}
       {gazeCalib&&<CalibrationScreen onDone={handleGazeCalibDone} onCancel={stopGaze} onCalibClick={(x,y)=>{ calibPtsRef.current.push([x,y]); }} />}
     </div>
