@@ -377,6 +377,15 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
         </div>
       </div>
 
+      {/* 인트로 중앙 안내 */}
+      {phase==='intro' && (
+        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16,animation:'fadeIn 0.4s ease-out'}}>
+          <div style={{fontSize:56}}>👁️</div>
+          <div style={{color:'#fff',fontWeight:800,fontSize:20}}>화면을 바라보며 준비하세요</div>
+          <div style={{color:'#aaa',fontSize:13}}>곧 캘리브레이션이 시작됩니다</div>
+        </div>
+      )}
+
       {/* 3·2·1 오버레이 */}
       {phase==='countdown' && ready > 0 && (
         <div style={{position:'absolute',inset:0,zIndex:10,display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.6)'}}>
@@ -1205,22 +1214,23 @@ function HelpPanel({ open, onClose }) {
 
       {/* 기본 모드 */}
       <span style={sec}>🔹 기본 모드</span>
-      <div style={item}><span style={icon}>▶️</span><span style={txt}><span style={bold}>재생 모드</span>: 패드를 탭하면 녹화된 영상 또는 소리가 재생됩니다.</span></div>
+      <div style={item}><span style={icon}>▶️</span><span style={txt}><span style={bold}>재생 모드</span>: 패드를 탭하면 녹화된 영상 또는 소리가 재생됩니다. 다른 패드를 탭하면 기존 재생이 중단되고 새 패드가 재생됩니다.</span></div>
       <div style={item}><span style={icon}>🔴</span><span style={txt}><span style={bold}>녹화/녹음 모드</span>: 우측 상단 버튼으로 전환합니다. 현재 기록 방식에 따라 버튼이 <span style={bold}>🔴 녹화</span> 또는 <span style={bold}>🎙 녹음</span>으로 표시됩니다.</span></div>
+      <div style={item}><span style={icon}>⌨️</span><span style={txt}><span style={bold}>키보드/스위치 접근</span>: 재생 모드에서 Enter 또는 Space 키로도 패드를 선택할 수 있습니다. 외부 스위치 기기를 사용하는 학생에게 적합합니다.</span></div>
 
       {/* 녹화/녹음 */}
       <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
       <span style={sec}>🔹 녹화 · 녹음하기</span>
-      <div style={item}><span style={icon}>1️⃣</span><span style={txt}>녹화/녹음 모드에서 <span style={bold}>빈 패드를 탭</span>하면 3·2·1 카운트다운 후 시작됩니다.</span></div>
+      <div style={item}><span style={icon}>1️⃣</span><span style={txt}>녹화/녹음 모드에서 <span style={bold}>빈 패드를 탭</span>하면 직접 녹화하거나 파일에서 불러올 수 있습니다.</span></div>
       <div style={item}><span style={icon}>🎬</span><span style={txt}><span style={bold}>영상 녹화</span>: 카메라 화면이 보이며 영상+소리를 함께 녹화합니다. <span style={bold}>⏹ 녹화 완료</span>를 누르거나 시간이 다 되면 자동 저장됩니다.</span></div>
-      <div style={item}><span style={icon}>🎙</span><span style={txt}><span style={bold}>음성 녹음</span>: 카메라 없이 소리만 녹음합니다. 화면에 파형 애니메이션이 표시되며, <span style={bold}>⏹ 녹음 완료</span>를 누르면 저장됩니다.</span></div>
+      <div style={item}><span style={icon}>🎙</span><span style={txt}><span style={bold}>음성 녹음</span>: 카메라 없이 소리만 녹음합니다. 완료 후 썸네일 이미지를 설정할 수 있습니다.</span></div>
+      <div style={item}><span style={icon}>📁</span><span style={txt}><span style={bold}>파일 불러오기</span>: 기기에 저장된 영상·음성 파일을 불러올 수 있습니다. 필요한 구간만 잘라서 저장됩니다.</span></div>
       <div style={item}><span style={icon}>3️⃣</span><span style={txt}>이미 녹화된 패드를 탭하면 <span style={bold}>덮어쓰기 확인</span> 메시지가 나타납니다.</span></div>
 
       {/* 편집 */}
       <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
       <span style={sec}>🔹 패드 편집 (녹화/녹음 모드)</span>
       <div style={item}><span style={icon}>✏️</span><span style={txt}>패드 <span style={bold}>좌상단 ✏️ 버튼</span>을 누르면 이름, 볼륨, 썸네일 이미지를 수정할 수 있습니다.</span></div>
-      <div style={item}><span style={icon}>📁</span><span style={txt}>✏️ 편집 화면에서 <span style={bold}>이미지 변경</span>을 누르면 사진 앨범에서 썸네일을 직접 설정할 수 있습니다.</span></div>
       <div style={item}><span style={icon}>✕</span><span style={txt}>패드 <span style={bold}>우상단 ✕ 버튼</span>을 누르면 해당 패드의 내용을 삭제합니다.</span></div>
       <div style={item}><span style={icon}>👆</span><span style={txt}>패드를 <span style={bold}>길게 누르면</span> 드래그해서 순서를 바꿀 수 있습니다.</span></div>
 
@@ -1228,22 +1238,21 @@ function HelpPanel({ open, onClose }) {
       <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
       <span style={sec}>🔹 기록 방식 전환</span>
       <div style={item}><span style={icon}>⚙️</span><span style={txt}>환경설정 → <span style={bold}>기본 기록 방식</span>에서 영상 녹화와 음성 녹음을 전환할 수 있습니다.</span></div>
-      <div style={item}><span style={icon}>🔀</span><span style={txt}>방식을 바꾸면 우측 상단 버튼 텍스트도 <span style={bold}>🔴 녹화 ↔ 🎙 녹음</span>으로 함께 바뀝니다.</span></div>
       <div style={item}><span style={icon}>📋</span><span style={txt}>각 패드는 녹화 당시의 방식(영상/음성)을 기억합니다. 영상 패드와 음성 패드를 <span style={bold}>혼합해서 사용</span>할 수 있어요.</span></div>
 
       {/* 구성 관리 */}
       <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
       <span style={sec}>🔹 구성 관리 (📂)</span>
-      <div style={item}><span style={icon}>💾</span><span style={txt}>상단 <span style={bold}>📂 버튼</span>을 누르면 현재 패드 구성을 이름을 붙여 저장할 수 있습니다.</span></div>
-      <div style={item}><span style={icon}>📋</span><span style={txt}>저장된 구성 목록에서 <span style={bold}>불러오기</span>를 누르면 해당 패드 배치와 내용이 그대로 복원됩니다.</span></div>
+      <div style={item}><span style={icon}>💾</span><span style={txt}>상단 <span style={bold}>📂 버튼</span>을 누르면 현재 패드 구성을 이름을 붙여 저장할 수 있습니다. 패드 내용뿐 아니라 환경설정(볼륨, 녹화 시간 등)도 함께 저장됩니다.</span></div>
+      <div style={item}><span style={icon}>📋</span><span style={txt}>저장된 구성 목록에서 <span style={bold}>불러오기</span>를 누르면 패드 배치, 내용, 환경설정이 모두 복원됩니다.</span></div>
       <div style={item}><span style={icon}>🔀</span><span style={txt}>수업별로 구성을 저장해두면 필요할 때 빠르게 전환할 수 있습니다. 예: "1교시 동물 소리", "2교시 악기"</span></div>
 
       {/* 환경설정 */}
       <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
       <span style={sec}>🔹 환경설정 (⚙️)</span>
-      <div style={item}><span style={icon}>⚙️</span><span style={txt}>상단 핸들을 <span style={bold}>아래로 드래그</span>하거나 ✕ 버튼으로 닫을 수 있습니다.</span></div>
-      <div style={item}><span style={icon}>📐</span><span style={txt}>가로·세로 패드 수, 최대 녹화 시간, 전체 볼륨, 카메라 방향을 설정할 수 있습니다.</span></div>
-      <div style={item}><span style={icon}>🔄</span><span style={txt}>모든 내용은 <span style={bold}>완료 후 자동 저장</span>됩니다. 브라우저를 닫아도 유지됩니다.</span></div>
+      <div style={item}><span style={icon}>📐</span><span style={txt}>기본 기록 방식, 버튼 배치(가로·세로), 최대 녹화 시간, 전체 볼륨, 카메라 방향을 설정할 수 있습니다.</span></div>
+      <div style={item}><span style={icon}>👁️</span><span style={txt}>시선 응시 시간, 눈떨림 모드 등 시선 트래킹 관련 설정도 이곳에서 조정합니다.</span></div>
+      <div style={item}><span style={icon}>🔄</span><span style={txt}>모든 내용은 <span style={bold}>자동 저장</span>됩니다. 브라우저를 닫아도 유지됩니다.</span></div>
 
       <div style={{ marginTop:24,padding:'14px 16px',background:'#0d0d1a',borderRadius:12,border:'1px solid #1e1e3a' }}>
         <div style={{ color:'#555',fontSize:11,lineHeight:1.8 }}>
@@ -1255,11 +1264,12 @@ function HelpPanel({ open, onClose }) {
       <div style={{ height:1,background:'#1e1e3a',margin:'20px 0' }} />
       <span style={sec}>🔹 시선 트래킹 (👁️)</span>
       <div style={item}><span style={icon}>👁️</span><span style={txt}>상단 <span style={bold}>👁️ 버튼</span>을 누르면 웹캠으로 시선을 인식해 패드를 눈으로 선택할 수 있습니다. 손을 쓰기 어려운 학생에게 적합합니다.</span></div>
-      <div style={item}><span style={icon}>🎯</span><span style={txt}><span style={bold}>캘리브레이션</span>: 활성화 시 9개 점이 순서대로 나타납니다. 각 점을 바라보면서 탭하면 시선 보정이 완료됩니다. 매 세션마다 필요합니다.</span></div>
-      <div style={item}><span style={icon}>⏱️</span><span style={txt}><span style={bold}>Dwell 선택</span>: 패드를 <span style={bold}>1.5초 응시</span>하면 원형 게이지가 차오르며 자동 재생됩니다. 시선을 움직이면 게이지가 초기화됩니다.</span></div>
-      <div style={item}><span style={icon}>💾</span><span style={txt}><span style={bold}>캘리브레이션 저장</span>: 캘리브레이션 완료 시 자동으로 저장됩니다. 다음 번 👁️ 버튼을 누르면 <span style={bold}>저장된 캘리브레이션 사용</span> 또는 <span style={bold}>새로 캘리브레이션</span>을 선택할 수 있습니다.</span></div>
-      <div style={item}><span style={icon}>⚠️</span><span style={txt}>자세, 조명, 기기 거리가 크게 달라졌다면 새로 캘리브레이션하는 것이 정확도에 유리합니다.</span></div>
-      <div style={item}><span style={icon}>💡</span><span style={txt}><span style={bold}>정확도 팁</span>: 화면에서 30-50cm 거리, 정면 조명, 흔들리지 않는 자세에서 인식률이 높아집니다. 역광이나 어두운 환경은 피하세요.</span></div>
+      <div style={item}><span style={icon}>🎯</span><span style={txt}><span style={bold}>캘리브레이션</span>: 화면의 여러 지점을 바라보며 시선을 보정합니다. 보정 완료 후 <span style={bold}>탭하여 시작</span>을 눌러 시선 모드에 진입합니다.</span></div>
+      <div style={item}><span style={icon}>⏱️</span><span style={txt}><span style={bold}>시선 응시</span>: 패드를 일정 시간 응시하면 원형 게이지가 차오르며 자동 재생됩니다. 응시 시간은 환경설정에서 조절할 수 있습니다.</span></div>
+      <div style={item}><span style={icon}>💾</span><span style={txt}><span style={bold}>캘리브레이션 저장</span>: 보정 데이터가 자동 저장됩니다. 다음 번에는 <span style={bold}>저장된 캘리브레이션 사용</span> 또는 <span style={bold}>새로 캘리브레이션</span>을 선택할 수 있습니다.</span></div>
+      <div style={item}><span style={icon}>🧿</span><span style={txt}><span style={bold}>눈떨림 모드</span>: 눈떨림이 있는 학생을 위해 인식 범위를 넓히고 안정화를 강화합니다. 환경설정에서 켤 수 있습니다.</span></div>
+      <div style={item}><span style={icon}>📍</span><span style={txt}><span style={bold}>코너 보정</span>: 시선 모드 중 화면 모서리를 3초 응시하면 자동으로 해당 위치가 보정됩니다.</span></div>
+      <div style={item}><span style={icon}>💡</span><span style={txt}><span style={bold}>정확도 팁</span>: 화면에서 30-50cm 거리, 정면 조명, 흔들리지 않는 자세에서 인식률이 높아집니다.</span></div>
 
       <div style={{ padding:'12px 14px',background:'rgba(76,201,240,0.06)',borderRadius:10,border:'1px solid rgba(76,201,240,0.15)',marginBottom:14 }}>
         <div style={{ color:'#4CC9F0',fontSize:11,fontWeight:800,marginBottom:8 }}>기기별 권장 설정</div>
@@ -1273,10 +1283,10 @@ function HelpPanel({ open, onClose }) {
       <div style={{ padding:'12px 14px',background:'rgba(255,77,109,0.06)',borderRadius:10,border:'1px solid rgba(255,77,109,0.15)',marginBottom:14 }}>
         <div style={{ color:'#FF4D6D',fontSize:11,fontWeight:800,marginBottom:6 }}>주의사항</div>
         <div style={{ color:'#aaa',fontSize:12,lineHeight:1.9 }}>
-          · 시선 트래킹은 재생 모드에서만 동작합니다.<br/>
+          · 시선 트래킹은 재생 모드에서만 동작합니다. 녹화 모드에서는 자동으로 일시 중지됩니다.<br/>
           · 초기 모델 로딩에 5-10초가 소요될 수 있습니다.<br/>
-          · 구형 기기(iPhone X 이하 등)에서는 성능이 저하될 수 있습니다.<br/>
-          · 안경·강한 역광 환경에서는 인식률이 낮아집니다.
+          · 안경·강한 역광 환경에서는 인식률이 낮아집니다.<br/>
+          · 전체 초기화를 해도 시선 캘리브레이션 데이터는 유지됩니다.
         </div>
       </div>
 
@@ -1375,7 +1385,7 @@ function Settings({ open, onClose, cfg, set, onReset }) {
 
       {/* 시선 응시 시간 */}
       <div style={{ marginBottom:32 }}>
-        <div style={sec}>👁️ 시선 응시 시간 (Dwell)</div>
+        <div style={sec}>👁️ 시선 응시 시간</div>
         <div style={{ display:'flex',gap:8 }}>
           {[500,800,1000,1500].map(ms=>(
             <button key={ms} style={sBtn(dwellMs===ms)} onClick={()=>set('dwellMs',ms)}>{ms<1000?ms+'ms':ms/1000+'초'}</button>
@@ -1388,13 +1398,13 @@ function Settings({ open, onClose, cfg, set, onReset }) {
 
       {/* 👁️ 시선 트래킹 설정 */}
       <div style={{ marginBottom:24 }}>
-        <div style={sec}>👁️ 안진증 모드</div>
+        <div style={sec}>👁️ 눈떨림 모드</div>
         <div style={{ display:'flex',gap:8 }}>
           <button style={sBtn(!nystagmusMode)} onClick={()=>set('nystagmusMode',false)}>일반</button>
-          <button style={sBtn(nystagmusMode)}  onClick={()=>set('nystagmusMode',true)}>🧿 안진증</button>
+          <button style={sBtn(nystagmusMode)}  onClick={()=>set('nystagmusMode',true)}>🧿 눈떨림</button>
         </div>
         <div style={{ color:'#444',fontSize:11,marginTop:8 }}>
-          {nystagmusMode ? '불수의적 안구 운동 학생용 — 인식 범위 확대 + 강한 안정화' : '일반 시선 트래킹 모드'}
+          {nystagmusMode ? '눈떨림이 있는 학생용 — 인식 범위 확대 + 강한 안정화' : '일반 시선 트래킹 모드'}
         </div>
       </div>
 
@@ -1415,7 +1425,7 @@ function App() {
   const [cameraFacing,   setCameraFacing]   = useState('user');
   const [defaultRecType, setDefaultRecType] = useState('video');
   const [dwellMs,        setDwellMs]        = useState(1000);
-  const [nystagmusMode,  setNystagmusMode]  = useState(false); // 안진증 모드
+  const [nystagmusMode,  setNystagmusMode]  = useState(false); // 눈떨림 모드
 
   const [pads,         setPads]         = useState(() => Array(12).fill(null));
   const [mode,         setMode]         = useState('play');
@@ -2011,7 +2021,7 @@ function App() {
         for (let i = 0; i < rects.length; i++) {
           const r = rects[i];
           if (!r || playKeysRef.current[i]) continue;
-          // margin: 패드 크기의 15%(안진증 25%), 최대 30px
+          // margin: 패드 크기의 15%(눈떨림 25%), 최대 30px
           // 2×1 같은 대형 패드에서 화면 전체 커버 방지
           const m = Math.min(Math.round(Math.min(r.right-r.left, r.bottom-r.top) * (nys?0.25:0.15)), 30);
           if (data.x>=r.left-m && data.x<=r.right+m && data.y>=r.top-m && data.y<=r.bottom+m) {
